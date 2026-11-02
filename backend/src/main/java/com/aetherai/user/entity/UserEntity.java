@@ -35,6 +35,9 @@ public class UserEntity {
 	@Column(nullable = false)
 	private boolean enabled = true;
 
+	@Column(name = "plan_key", nullable = false, length = 16)
+	private String planKey = "free";
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
@@ -80,6 +83,10 @@ public class UserEntity {
 
 	public boolean isEnabled() {
 		return enabled;
+	}
+
+	public String getPlanKey() {
+		return planKey;
 	}
 
 	public void setEnabled(boolean enabled) {

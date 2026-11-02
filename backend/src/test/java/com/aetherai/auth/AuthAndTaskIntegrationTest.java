@@ -1,6 +1,10 @@
 package com.aetherai.auth;
 
 import com.jayway.jsonpath.JsonPath;
+import com.aetherai.common.exception.ApiException;
+import com.aetherai.plan.service.PlanLimitService;
+import com.aetherai.usage.entity.UsageLogEntity;
+import com.aetherai.usage.repository.UsageRepository;
 import com.aetherai.user.entity.UserEntity;
 import com.aetherai.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -17,6 +22,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -41,6 +47,12 @@ class AuthAndTaskIntegrationTest {
 
 	@Autowired
 	private UserRepository userRepository;
+
+	@Autowired
+	private PlanLimitService planLimitService;
+
+	@Autowired
+	private UsageRepository usageRepository;
 
 	private String firstUserToken;
 	private String firstUserId;
@@ -102,6 +114,20 @@ class AuthAndTaskIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.theme").value("system"))
 				.andExpect(jsonPath("$.locale").value("en-US"));
+
+		mockMvc.perform(put("/api/v1/users/me")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"displayName":"Updated Name"}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.displayName").value("Updated Name"));
+
+		mockMvc.perform(get("/api/v1/usage")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totals.requests").value(0));
 	}
 
 	@Test
@@ -196,6 +222,92 @@ class AuthAndTaskIntegrationTest {
 								"""))
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.message").value("The AI provider is not configured."));
+
+		mockMvc.perform(get("/api/v1/conversations/" + conversationId + "/messages")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(0));
+	}
+
+	@Test
+	void aiStatusReportsWhenNoProviderIsConfigured() throws Exception {
+		mockMvc.perform(get("/api/v1/ai/status")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.configured").value(false));
+	}
+
+	@Test
+	void planCatalogReturnsPricesAndLimitsForTheAuthenticatedUser() throws Exception {
+		mockMvc.perform(get("/api/v1/plans")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.currentPlanKey").value("free"))
+				.andExpect(jsonPath("$.plans[0].key").value("free"))
+				.andExpect(jsonPath("$.plans[0].monthlyPriceCents").value(0))
+				.andExpect(jsonPath("$.plans[0].monthlyMessages").value(15))
+				.andExpect(jsonPath("$.plans[0].activeTaskLimit").value(10))
+				.andExpect(jsonPath("$.plans[0].conversationLimit").value(1))
+				.andExpect(jsonPath("$.plans[0].documentStorageBytes").value(50L * 1024 * 1024))
+				.andExpect(jsonPath("$.plans[1].monthlyPriceCents").value(2500))
+				.andExpect(jsonPath("$.plans[1].monthlyMessages").value(250))
+				.andExpect(jsonPath("$.plans[1].activeTaskLimit").value(100))
+				.andExpect(jsonPath("$.plans[1].documentStorageBytes").value(1024L * 1024 * 1024))
+				.andExpect(jsonPath("$.plans[2].key").value("ultra"))
+				.andExpect(jsonPath("$.plans[2].monthlyPriceCents").value(10000))
+				.andExpect(jsonPath("$.plans[2].monthlyMessages").value(1000))
+				.andExpect(jsonPath("$.plans[2].documentStorageBytes").value(5L * 1024 * 1024 * 1024));
+	}
+
+	@Test
+	void freePlanEnforcesActiveTaskConversationAndMonthlyMessageLimits() throws Exception {
+		for (int index = 0; index < 10; index++) {
+			mockMvc.perform(post("/api/v1/tasks")
+							.header("Authorization", bearer(firstUserToken))
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("""
+									{"title":"Tarefa %d"}
+									""".formatted(index)))
+					.andExpect(status().isCreated());
+		}
+		mockMvc.perform(post("/api/v1/tasks")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"title":"Tarefa extra"}
+								"""))
+				.andExpect(status().is(429))
+				.andExpect(jsonPath("$.message").value(
+						"Você atingiu o limite de tarefas ativas do plano Free. Consulte os planos disponíveis."));
+
+		mockMvc.perform(post("/api/v1/conversations")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"title":"Minha conversa"}
+								"""))
+				.andExpect(status().isCreated());
+		mockMvc.perform(post("/api/v1/conversations")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"title":"Conversa extra"}
+								"""))
+				.andExpect(status().is(429));
+
+		UUID userId = UUID.fromString(firstUserId);
+		for (int index = 0; index < 15; index++) {
+			usageRepository.save(new UsageLogEntity(userId, null, "chat.completion", 1, 1));
+		}
+		ApiException messageLimit = assertThrows(
+				ApiException.class,
+				() -> planLimitService.ensureCanSendMessage(userId));
+		assertEquals(HttpStatus.TOO_MANY_REQUESTS, messageLimit.getStatus());
+
+		ApiException documentLimit = assertThrows(
+				ApiException.class,
+				() -> planLimitService.ensureCanStoreDocument(userId, 50L * 1024 * 1024 + 1));
+		assertEquals(HttpStatus.TOO_MANY_REQUESTS, documentLimit.getStatus());
 	}
 
 	@Test
@@ -228,6 +340,21 @@ class AuthAndTaskIntegrationTest {
 						.delete("/api/v1/documents/" + documentId)
 						.header("Authorization", bearer(firstUserToken)))
 				.andExpect(status().isNoContent());
+	}
+
+	@Test
+	void documentUploadRejectsContentThatDoesNotMatchItsDeclaredType() throws Exception {
+		MockMultipartFile file = new MockMultipartFile(
+				"file",
+				"notes.txt",
+				"text/plain",
+				new byte[] {0, 1, 2, 3});
+
+		mockMvc.perform(multipart("/api/v1/documents")
+						.file(file)
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("Text files cannot contain binary control characters."));
 	}
 
 	private String register(String email) throws Exception {

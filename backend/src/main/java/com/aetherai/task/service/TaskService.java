@@ -1,6 +1,7 @@
 package com.aetherai.task.service;
 
 import com.aetherai.common.exception.ApiException;
+import com.aetherai.plan.service.PlanLimitService;
 import com.aetherai.task.dto.TaskRequest;
 import com.aetherai.task.dto.TaskResponse;
 import com.aetherai.task.entity.TaskEntity;
@@ -17,9 +18,11 @@ import java.util.UUID;
 public class TaskService {
 
 	private final TaskRepository taskRepository;
+	private final PlanLimitService planLimitService;
 
-	public TaskService(TaskRepository taskRepository) {
+	public TaskService(TaskRepository taskRepository, PlanLimitService planLimitService) {
 		this.taskRepository = taskRepository;
+		this.planLimitService = planLimitService;
 	}
 
 	@Transactional(readOnly = true)
@@ -36,6 +39,9 @@ public class TaskService {
 
 	@Transactional
 	public TaskResponse create(UUID userId, TaskRequest request) {
+		if (!Boolean.TRUE.equals(request.completed())) {
+			planLimitService.ensureCanCreateTask(userId);
+		}
 		TaskEntity task = new TaskEntity(
 				userId,
 				request.title().trim(),
@@ -51,11 +57,15 @@ public class TaskService {
 	@Transactional
 	public TaskResponse update(UUID userId, UUID taskId, TaskRequest request) {
 		TaskEntity task = getOwnedTask(userId, taskId);
+		boolean completed = Boolean.TRUE.equals(request.completed());
+		if (task.isCompleted() && !completed) {
+			planLimitService.ensureCanReopenTask(userId);
+		}
 		task.update(
 				request.title().trim(),
 				normalizeDescription(request.description()),
 				normalizePriority(request.priority()),
-				Boolean.TRUE.equals(request.completed()),
+				completed,
 				request.dueAt());
 		return TaskResponse.from(taskRepository.save(task));
 	}

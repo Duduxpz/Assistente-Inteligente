@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Circle,
+  CreditCard,
   Database,
   Download,
   FileText,
@@ -43,6 +44,7 @@ import {
   type ChatMessage,
   type Conversation,
   type DocumentItem,
+  type PlanCatalog,
   type Task,
   type UserSettings,
 } from './lib/api'
@@ -53,6 +55,7 @@ const navigation = [
   { label: 'Conversas', path: '/chat', icon: MessageSquareText },
   { label: 'Documentos', path: '/documents', icon: FolderOpen },
   { label: 'Tarefas', path: '/tasks', icon: Check },
+  { label: 'Planos', path: '/plans', icon: CreditCard },
 ]
 
 const pageTitles: Record<string, string> = {
@@ -60,14 +63,43 @@ const pageTitles: Record<string, string> = {
   '/chat': 'Conversas',
   '/documents': 'Documentos',
   '/tasks': 'Tarefas',
+  '/plans': 'Planos',
   '/admin': 'Administração',
   '/settings': 'Configurações',
+}
+
+let systemThemeMedia: MediaQueryList | null = null
+let systemThemeListener: (() => void) | null = null
+
+function applyTheme(theme: UserSettings['theme']) {
+  clearSystemThemeListener()
+
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  const update = () => {
+    const isDark = theme === 'dark' || (theme === 'system' && media.matches)
+    document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
+  }
+  update()
+  if (theme === 'system') {
+    systemThemeMedia = media
+    systemThemeListener = update
+    media.addEventListener('change', update)
+  }
+}
+
+function clearSystemThemeListener() {
+  if (systemThemeMedia && systemThemeListener) {
+    systemThemeMedia.removeEventListener('change', systemThemeListener)
+  }
+  systemThemeMedia = null
+  systemThemeListener = null
 }
 
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/admin/login" element={<AuthPage mode="admin" />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
       <Route path="/*" element={<RequireAuthentication><ApplicationShell /></RequireAuthentication>} />
     </Routes>
@@ -81,7 +113,10 @@ function RequireAuthentication({ children }: { children: ReactNode }) {
   if (loading) {
     return <main className="auth-page"><p className="auth-loading">Conectando à sua conta...</p></main>
   }
-  if (!token) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (!token) {
+    const loginPath = location.pathname.startsWith('/admin') ? '/admin/login' : '/login'
+    return <Navigate to={loginPath} replace state={{ from: location.pathname }} />
+  }
   if (!user) {
     return (
       <main className="auth-page">
@@ -100,10 +135,47 @@ function RequireAuthentication({ children }: { children: ReactNode }) {
 
 function ApplicationShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [themeError, setThemeError] = useState('')
+  const [aiConfigured, setAIConfigured] = useState<boolean | null>(null)
+  const [aiStatusError, setAiStatusError] = useState('')
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { token, user, logout } = useAuth()
   const pageTitle = pageTitles[location.pathname] ?? 'AETHER AI'
+
+  useEffect(() => {
+    let active = true
+    void apiRequest<UserSettings>('/users/me/settings', {}, token)
+      .then(({ theme }) => {
+        if (!active) return
+        applyTheme(theme)
+        setThemeError('')
+      })
+      .catch(() => {
+        if (active) setThemeError('Não foi possível carregar o tema salvo da sua conta.')
+      })
+    return () => {
+      active = false
+      clearSystemThemeListener()
+    }
+  }, [token])
+
+  useEffect(() => {
+    let active = true
+    void apiRequest<{ configured: boolean }>('/ai/status', {}, token)
+      .then(({ configured }) => {
+        if (!active) return
+        setAIConfigured(configured)
+        setAiStatusError('')
+      })
+      .catch(() => {
+        if (active) {
+          setAIConfigured(null)
+          setAiStatusError('Não foi possível verificar o status da integração de IA.')
+        }
+      })
+    return () => { active = false }
+  }, [token])
 
   function startConversation() {
     setMobileMenuOpen(false)
@@ -129,7 +201,7 @@ function ApplicationShell() {
           <span className="workspace-avatar">D</span>
           <span className="workspace-copy">
             <span>Meu espaço</span>
-            <span>Plano pessoal</span>
+            <span>Meu plano atual</span>
           </span>
           <ChevronDown size={15} />
         </div>
@@ -159,8 +231,8 @@ function ApplicationShell() {
           <div className="usage-card">
             <span className="usage-icon"><Bot size={16} /></span>
             <div className="usage-copy">
-              <strong>Seu espaço está pronto</strong>
-              <span>Conecte a IA para começar</span>
+              <strong>{aiConfigured ? 'IA conectada' : 'Seu espaço está pronto'}</strong>
+              <span>{aiConfigured ? 'OpenRouter configurado' : 'Conecte a IA para começar'}</span>
             </div>
             <ArrowRight size={14} />
           </div>
@@ -234,16 +306,35 @@ function ApplicationShell() {
             </button>
           </div>
         </header>
-
+        {themeError && <p className="theme-load-error" role="status">{themeError}</p>}
         <div className="page-content">
           <Routes>
-            <Route path="/" element={<Dashboard onStartConversation={startConversation} />} />
+            <Route
+              path="/"
+              element={(
+                <Dashboard
+                  aiConfigured={aiConfigured}
+                  aiStatusError={aiStatusError}
+                  onStartConversation={startConversation}
+                />
+              )}
+            />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/plans" element={<PlansPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/admin" element={<AdminPage />} />
-            <Route path="*" element={<Dashboard onStartConversation={startConversation} />} />
+            <Route path="/admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
+            <Route
+              path="*"
+              element={(
+                <Dashboard
+                  aiConfigured={aiConfigured}
+                  aiStatusError={aiStatusError}
+                  onStartConversation={startConversation}
+                />
+              )}
+            />
           </Routes>
         </div>
       </main>
@@ -251,7 +342,20 @@ function ApplicationShell() {
   )
 }
 
-function Dashboard({ onStartConversation }: { onStartConversation: () => void }) {
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  return user?.roles.includes('ROLE_ADMIN') ? children : <Navigate to="/" replace />
+}
+
+function Dashboard({
+  onStartConversation,
+  aiConfigured,
+  aiStatusError,
+}: {
+  onStartConversation: () => void
+  aiConfigured: boolean | null
+  aiStatusError: string
+}) {
   const { token } = useAuth()
   const navigate = useNavigate()
   const [stats, setStats] = useState<{ conversations: number; documents: number; tasks: number } | null>(null)
@@ -307,11 +411,16 @@ function Dashboard({ onStartConversation }: { onStartConversation: () => void })
       <section className="connection-notice" aria-label="Status da integração">
         <span className="notice-icon"><ShieldAlert size={18} /></span>
         <div className="notice-copy">
-          <strong>A integração com IA ainda não está configurada</strong>
-          <span>Nenhuma resposta será simulada. Quando a API estiver pronta, você poderá conversar por aqui.</span>
+          <strong>{aiConfigured ? 'A integração com IA está pronta' : 'A integração com IA ainda não está configurada'}</strong>
+          <span>
+            {aiConfigured
+              ? 'As respostas serão geradas pelo provedor configurado.'
+              : 'Nenhuma resposta será simulada. Configure sua chave OpenRouter para conversar por aqui.'}
+          </span>
         </div>
-        <span className="notice-status">EM CONFIGURAÇÃO</span>
+        <span className="notice-status">{aiConfigured ? 'CONECTADA' : 'EM CONFIGURAÇÃO'}</span>
       </section>
+      {aiStatusError && <p className="dashboard-data-error" role="status">{aiStatusError}</p>}
       {statsError && <p className="dashboard-data-error" role="status">{statsError}</p>}
       {stats && (
         <section className="dashboard-stats" aria-label="Resumo da conta">
@@ -334,7 +443,7 @@ function Dashboard({ onStartConversation }: { onStartConversation: () => void })
           icon={<MessageSquareText size={19} />}
           label="CONVERSAS"
           title="Suas ideias começam aqui"
-          description="Abra uma conversa quando a integração com IA estiver disponível."
+          description="Crie conversas e conecte seu provedor OpenRouter."
           action="Ir para conversas"
           onClick={onStartConversation}
           accent="violet"
@@ -343,7 +452,7 @@ function Dashboard({ onStartConversation }: { onStartConversation: () => void })
           icon={<FileText size={19} />}
           label="DOCUMENTOS"
           title="Conhecimento organizado"
-          description="O espaço para seus arquivos está sendo preparado."
+          description="Envie, organize e baixe seus arquivos privados."
           action="Explorar documentos"
           onClick={() => navigate('/documents')}
           accent="cyan"
@@ -352,7 +461,7 @@ function Dashboard({ onStartConversation }: { onStartConversation: () => void })
           icon={<Check size={19} />}
           label="TAREFAS"
           title="Planos que saem do papel"
-          description="Em breve, você poderá acompanhar suas tarefas por aqui."
+          description="Crie tarefas, defina prioridades e acompanhe prazos."
           action="Ver tarefas"
           onClick={() => navigate('/tasks')}
           accent="blue"
@@ -1021,6 +1130,7 @@ function SettingsPage() {
   const [displayName, setDisplayName] = useState(user?.displayName ?? '')
   const [preferences, setPreferences] = useState<UserSettings | null>(null)
   const [busy, setBusy] = useState(false)
+  const [savingTheme, setSavingTheme] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -1028,7 +1138,10 @@ function SettingsPage() {
     let active = true
     void apiRequest<UserSettings>('/users/me/settings', {}, token)
       .then((settings) => {
-        if (active) setPreferences(settings)
+        if (active) {
+          setPreferences(settings)
+          applyTheme(settings.theme)
+        }
       })
       .catch((requestError: unknown) => {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar as preferências.')
@@ -1048,6 +1161,30 @@ function SettingsPage() {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível atualizar o perfil.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function saveTheme(theme: UserSettings['theme']) {
+    if (!preferences || savingTheme) return
+    const previousTheme = preferences.theme
+    setSavingTheme(true)
+    setError('')
+    setNotice('')
+    setPreferences({ ...preferences, theme })
+    applyTheme(theme)
+    try {
+      const updated = await apiRequest<UserSettings>('/users/me/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ theme }),
+      }, token)
+      setPreferences(updated)
+      setNotice('Tema atualizado.')
+    } catch (requestError) {
+      setPreferences({ ...preferences, theme: previousTheme })
+      applyTheme(previousTheme)
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível atualizar o tema.')
+    } finally {
+      setSavingTheme(false)
     }
   }
 
@@ -1110,8 +1247,20 @@ function SettingsPage() {
           <span className="settings-value">{preferences?.locale ?? 'Carregando...'}</span>
         </div>
         <div className="settings-preference-row">
-          <div><strong>Tema</strong><span>Tema disponível nesta etapa</span></div>
-          <span className="settings-value">{preferences?.theme ?? 'Carregando...'}</span>
+          <div><strong>Tema</strong><span>Escolha a aparência deste site</span></div>
+          <label className="settings-theme-control">
+            <span className="sr-only">Tema do site</span>
+            <select
+              aria-label="Tema do site"
+              disabled={!preferences || savingTheme}
+              onChange={(event) => void saveTheme(event.target.value as UserSettings['theme'])}
+              value={preferences?.theme ?? 'dark'}
+            >
+              <option value="dark">Escuro</option>
+              <option value="light">Claro</option>
+              <option value="system">Do sistema</option>
+            </select>
+          </label>
         </div>
       </section>
       <section className="settings-card usage-settings-card">
@@ -1124,6 +1273,80 @@ function SettingsPage() {
           <Download size={15} /> Exportar resumo de uso
         </button>
       </section>
+    </section>
+  )
+}
+
+function PlansPage() {
+  const { token } = useAuth()
+  const [catalog, setCatalog] = useState<PlanCatalog | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    void apiRequest<PlanCatalog>('/plans', {}, token)
+      .then((response) => {
+        if (active) {
+          setCatalog(response)
+          setError('')
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os planos.')
+      })
+    return () => { active = false }
+  }, [token])
+
+  return (
+    <section className="plans-page">
+      <div className="tasks-heading">
+        <div>
+          <span className="section-kicker">PLANOS AETHER</span>
+          <h1>Escolha o espaço ideal para você.</h1>
+          <p>Compare limites e recursos de cada plano.</p>
+        </div>
+      </div>
+      {error && <p className="tasks-error" role="alert"><AlertCircle size={15} />{error}</p>}
+      {!catalog && !error && <p className="task-list-empty"><LoaderCircle size={16} className="spin-icon" /> Carregando planos...</p>}
+      {catalog && (
+        <div className="plan-grid">
+          {catalog.plans.map((plan) => {
+            const isCurrent = plan.key === catalog.currentPlanKey
+            const price = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+              .format(plan.monthlyPriceCents / 100)
+            const taskLimit = plan.activeTaskLimit === null
+              ? 'Tarefas ativas ilimitadas'
+              : `${plan.activeTaskLimit} tarefas ativas`
+            const conversationLimit = plan.conversationLimit === null
+              ? 'Conversas ilimitadas'
+              : `${plan.conversationLimit} ${plan.conversationLimit === 1 ? 'conversa' : 'conversas'}`
+
+            return (
+              <article className={`plan-card ${isCurrent ? 'plan-card-current' : ''}`} key={plan.key}>
+                {isCurrent && <span className="plan-current-badge">SEU PLANO</span>}
+                <h2>{plan.name}</h2>
+                <p className="plan-description">{plan.description}</p>
+                <p className="plan-price">
+                  <strong>{price}</strong>
+                  <span>/mês</span>
+                </p>
+                <ul className="plan-features">
+                  <li><Check size={15} />{plan.monthlyMessages} mensagens de IA por mês</li>
+                  <li><Check size={15} />{taskLimit}</li>
+                  <li><Check size={15} />{conversationLimit}</li>
+                  <li><Check size={15} />{formatBytes(plan.documentStorageBytes)} de documentos</li>
+                </ul>
+                <button className="plan-action" disabled type="button">
+                  {isCurrent ? 'Plano atual' : 'Upgrade em breve'}
+                </button>
+              </article>
+            )
+          })}
+        </div>
+      )}
+      <p className="plan-billing-note">
+        Os limites são aplicados pela sua conta. A cobrança automática ainda não está ativada.
+      </p>
     </section>
   )
 }
@@ -1211,7 +1434,8 @@ function AdminPage() {
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
 export default App

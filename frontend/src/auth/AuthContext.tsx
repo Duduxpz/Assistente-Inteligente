@@ -7,6 +7,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthContextValue['user']>(null)
   const [resolvedToken, setResolvedToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
   const loading = Boolean(token && resolvedToken !== token)
 
   const logout = useCallback(() => {
@@ -20,6 +21,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const reloadUser = useCallback(() => {
     setError(null)
     setResolvedToken(null)
+    setRetryCount((count) => count + 1)
   }, [])
 
   const updateProfile = useCallback(async (displayName: string) => {
@@ -57,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
     return () => { active = false }
-  }, [token, resolvedToken])
+  }, [token, retryCount])
 
   const authenticate = useCallback(async (result: ReturnType<typeof loginRequest>) => {
     const auth = await result

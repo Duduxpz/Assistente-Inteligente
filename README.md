@@ -1,50 +1,51 @@
 # AETHER AI
 
-Plataforma web de assistente de inteligência artificial, construída em etapas
-com frontend e backend independentes no mesmo repositório.
+Plataforma web de assistente inteligente, com backend Java/Spring e frontend
+React/TypeScript. O desenvolvimento continua por etapas; a conexão ao
+PostgreSQL real fica para a etapa final.
 
-## Estado do projeto
+## Implementado até aqui
 
-- **Frontend:** dashboard responsivo, navegação e páginas iniciais para
-  conversas, documentos, tarefas e configurações.
-- **Backend:** API inicial com health check, segurança stateless e migration
-  inicial para PostgreSQL.
-- **Pendente:** autenticação, integração com um provedor real de IA e conexão
-  confirmada com o banco PostgreSQL local.
+- Cadastro, login e JWT com senha protegida por PBKDF2.
+- Perfil, configurações iniciais e logout no cliente.
+- Tarefas com prioridades, datas, edição, conclusão e exclusão.
+- Conversas com histórico, renomeação e exclusão.
+- Upload, download e exclusão de documentos PDF, TXT e Markdown (limite de 10 MB).
+- Área administrativa protegida por função e resumo de utilização.
+- Catálogo Free/Plus/Ultra com limites de mensagens, tarefas, conversas e documentos.
+- Interface responsiva conectada à API.
+- Integração real opcional com OpenRouter via `AIProvider`; sem chave configurada,
+  o envio retorna erro explícito e nenhuma resposta fictícia é produzida.
+- Preferência de tema escuro, claro ou sincronizado com o sistema, salva na conta.
 
-O chat não inventa respostas: informa claramente que a integração ainda não
-está configurada.
-
-## Estrutura
-
-```text
-AETHER-AI/
-├── backend/
-├── frontend/
-├── docs/
-├── docker/
-├── .gitignore
-└── README.md
-```
+Recuperação de senha ainda depende de infraestrutura de e-mail. Veja
+[backend/README.md](./backend/README.md) para conectar o OpenRouter com uma chave
+local que não deve ser compartilhada ou versionada. Os preços dos planos são
+informativos; checkout e troca automática de plano ainda não estão ativados.
 
 ## Requisitos
 
-- Java 21 e Maven 3.10.0 para o backend.
-- Node.js e npm para o frontend.
-- PostgreSQL para executar o backend conectado ao banco.
+- Java 21 e Maven 3.10.0.
+- Node.js e npm.
+- PostgreSQL para produção (a configuração local atual usa H2 até a etapa final).
 
-Java e Maven foram configurados para o usuário nesta máquina. Para conferir as
-versões:
+## Executar localmente sem PostgreSQL
+
+Abra **dois terminais PowerShell** na raiz do repositório.
+
+No primeiro, gere uma chave JWT temporária e inicie o backend com H2:
 
 ```powershell
-java -version
-mvn -version
-node --version
-npm --version
-git --version
+$bytes = New-Object byte[] 32
+$rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+$rng.GetBytes($bytes)
+$rng.Dispose()
+$env:JWT_SECRET = [Convert]::ToBase64String($bytes)
+$env:SPRING_PROFILES_ACTIVE = 'dev'
+mvn -f backend\pom.xml spring-boot:run
 ```
 
-## Executar o frontend
+No segundo, inicie o frontend:
 
 ```powershell
 cd frontend
@@ -52,17 +53,18 @@ npm install
 npm run dev
 ```
 
-O Vite informa o endereço local no terminal, normalmente
-`http://localhost:5173`.
+Abra o endereço impresso pelo Vite, normalmente `http://localhost:5173`, e crie
+uma conta. O banco H2 local fica em `backend/data/` e não é enviado ao Git.
 
-## Verificar o backend
+## Testes
 
 ```powershell
 mvn -f backend\pom.xml test
+cd frontend
+npm run lint
+npm run build
 ```
 
-Os testes utilizam H2 em memória. Para iniciar o backend com PostgreSQL, siga as
-instruções em [backend/README.md](./backend/README.md).
-
-Não configure credenciais ou chaves secretas no código. Use variáveis de
-ambiente e mantenha arquivos locais `.env` fora do Git.
+Consulte [backend/README.md](./backend/README.md) e
+[frontend/README.md](./frontend/README.md) para detalhes. Não coloque senhas ou
+chaves reais em arquivos versionados.

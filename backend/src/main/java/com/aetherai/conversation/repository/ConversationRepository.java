@@ -12,4 +12,6 @@ public interface ConversationRepository extends JpaRepository<ConversationEntity
 	List<ConversationEntity> findAllByUserIdOrderByUpdatedAtDesc(UUID userId);
 
 	Optional<ConversationEntity> findByIdAndUserId(UUID id, UUID userId);
+
+	long countByUserId(UUID userId);
 }

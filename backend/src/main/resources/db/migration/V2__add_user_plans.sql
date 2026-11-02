@@ -1,0 +1,2 @@
+ALTER TABLE users
+    ADD COLUMN plan_key VARCHAR(16) NOT NULL DEFAULT 'free';

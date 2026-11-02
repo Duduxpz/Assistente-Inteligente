@@ -4,6 +4,7 @@ import com.aetherai.common.exception.ApiException;
 import com.aetherai.document.dto.DocumentResponse;
 import com.aetherai.document.entity.DocumentEntity;
 import com.aetherai.document.repository.DocumentRepository;
+import com.aetherai.plan.service.PlanLimitService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +14,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -31,12 +36,15 @@ public class DocumentService {
 			".md", "text/markdown");
 
 	private final DocumentRepository documentRepository;
+	private final PlanLimitService planLimitService;
 	private final Path storageRoot;
 
 	public DocumentService(
 			DocumentRepository documentRepository,
+			PlanLimitService planLimitService,
 			@Value("${app.documents.storage-path}") String storagePath) {
 		this.documentRepository = documentRepository;
+		this.planLimitService = planLimitService;
 		this.storageRoot = Path.of(storagePath).toAbsolutePath().normalize();
 	}
 
@@ -62,15 +70,19 @@ public class DocumentService {
 		if (expectedContentType == null || !expectedContentType.equalsIgnoreCase(file.getContentType())) {
 			throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF, TXT, and Markdown files are supported.");
 		}
+		planLimitService.ensureCanStoreDocument(userId, file.getSize());
 
 		UUID documentId = UUID.randomUUID();
 		String storageKey = userId + "/" + documentId;
 		Path destination = resolveStorageKey(storageKey);
 		try {
-			Files.createDirectories(destination.getParent());
+			byte[] content;
 			try (var input = file.getInputStream()) {
-				Files.copy(input, destination);
+				content = input.readAllBytes();
 			}
+			validateContent(extension, content);
+			Files.createDirectories(destination.getParent());
+			Files.write(destination, content);
 		} catch (IOException exception) {
 			throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "The document could not be stored.");
 		}
@@ -149,6 +161,31 @@ public class DocumentService {
 	private String extensionOf(String fileName) {
 		int extensionStart = fileName.lastIndexOf('.');
 		return extensionStart < 0 ? "" : fileName.substring(extensionStart).toLowerCase(Locale.ROOT);
+	}
+
+	private void validateContent(String extension, byte[] content) {
+		if (extension.equals(".pdf")) {
+			int headerLength = Math.min(content.length, 1024);
+			String header = new String(content, 0, headerLength, StandardCharsets.ISO_8859_1);
+			if (!header.contains("%PDF-")) {
+				throw new ApiException(HttpStatus.BAD_REQUEST, "The file content does not match a PDF document.");
+			}
+			return;
+		}
+
+		try {
+			String text = StandardCharsets.UTF_8.newDecoder()
+					.onMalformedInput(CodingErrorAction.REPORT)
+					.onUnmappableCharacter(CodingErrorAction.REPORT)
+					.decode(ByteBuffer.wrap(content))
+					.toString();
+			if (text.chars().anyMatch(character ->
+					Character.isISOControl(character) && character != '\n' && character != '\r' && character != '\t')) {
+				throw new ApiException(HttpStatus.BAD_REQUEST, "Text files cannot contain binary control characters.");
+			}
+		} catch (CharacterCodingException exception) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "Text files must use valid UTF-8 encoding.");
+		}
 	}
 
 	public record DownloadedDocument(DocumentEntity document, byte[] content) {

@@ -13,6 +13,7 @@ import com.aetherai.conversation.repository.ConversationRepository;
 import com.aetherai.message.dto.MessageResponse;
 import com.aetherai.message.entity.MessageEntity;
 import com.aetherai.message.repository.MessageRepository;
+import com.aetherai.plan.service.PlanLimitService;
 import com.aetherai.usage.service.UsageService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
@@ -29,16 +30,19 @@ public class ConversationService {
 	private final MessageRepository messageRepository;
 	private final ObjectProvider<AIProvider> aiProvider;
 	private final UsageService usageService;
+	private final PlanLimitService planLimitService;
 
 	public ConversationService(
 			ConversationRepository conversationRepository,
 			MessageRepository messageRepository,
 			ObjectProvider<AIProvider> aiProvider,
-			UsageService usageService) {
+			UsageService usageService,
+			PlanLimitService planLimitService) {
 		this.conversationRepository = conversationRepository;
 		this.messageRepository = messageRepository;
 		this.aiProvider = aiProvider;
 		this.usageService = usageService;
+		this.planLimitService = planLimitService;
 	}
 
 	@Transactional(readOnly = true)
@@ -50,6 +54,7 @@ public class ConversationService {
 
 	@Transactional
 	public ConversationResponse create(UUID userId, ConversationRequest request) {
+		planLimitService.ensureCanCreateConversation(userId);
 		ConversationEntity conversation = conversationRepository.save(
 				new ConversationEntity(userId, request.title().trim()));
 		return ConversationResponse.from(conversation);
@@ -74,8 +79,9 @@ public class ConversationService {
 		if (provider == null) {
 			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "The AI provider is not configured.");
 		}
+		planLimitService.ensureCanSendMessage(userId);
 		List<ChatTurn> turns = messageRepository
-				.findAllByConversationIdOrderByCreatedAtAsc(conversationId).stream()
+				.findAllByConversationIdOrderByCreatedAtAscIdAsc(conversationId).stream()
 				.map(message -> new ChatTurn(message.getRole(), message.getContent()))
 				.collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
 		turns.add(new ChatTurn("user", content));
@@ -93,7 +99,7 @@ public class ConversationService {
 		conversation.rename(conversation.getTitle());
 		conversationRepository.save(conversation);
 		List<ChatMessageItem> messages = messageRepository
-				.findAllByConversationIdOrderByCreatedAtAsc(conversationId).stream()
+				.findAllByConversationIdOrderByCreatedAtAscIdAsc(conversationId).stream()
 				.map(message -> new ChatMessageItem(
 						message.getId(),
 						message.getRole(),
@@ -106,7 +112,7 @@ public class ConversationService {
 	@Transactional(readOnly = true)
 	public List<MessageResponse> listMessages(UUID userId, UUID conversationId) {
 		getOwnedConversation(userId, conversationId);
-		return messageRepository.findAllByConversationIdOrderByCreatedAtAsc(conversationId).stream()
+		return messageRepository.findAllByConversationIdOrderByCreatedAtAscIdAsc(conversationId).stream()
 				.map(MessageResponse::from)
 				.toList();
 	}

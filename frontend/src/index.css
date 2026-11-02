@@ -24,6 +24,21 @@
   --cyan: #66d8df;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  color: #252b3a;
+  background: #f5f6fa;
+  --surface: #ffffff;
+  --surface-raised: #f8f9fc;
+  --surface-hover: #eef0f6;
+  --line: rgba(31, 41, 55, 0.1);
+  --line-strong: rgba(31, 41, 55, 0.16);
+  --muted: #656d7e;
+  --faint: #7a8292;
+  --accent: #7255c6;
+  --cyan: #187c88;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -34,10 +49,19 @@ html {
   background: #080a10;
 }
 
+html[data-theme="light"] {
+  background: #f5f6fa;
+}
+
 body {
   min-width: 360px;
   min-height: 100vh;
   margin: 0;
+}
+
+html[data-theme="light"] body {
+  color: #252b3a;
+  background: #f5f6fa;
 }
 
 body,

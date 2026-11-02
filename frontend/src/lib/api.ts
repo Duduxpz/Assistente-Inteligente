@@ -108,6 +108,22 @@ export interface UserSettings {
   locale: 'pt-BR' | 'en-US' | 'es-ES'
 }
 
+export interface PlanDetails {
+  key: 'free' | 'plus' | 'ultra'
+  name: string
+  description: string
+  monthlyPriceCents: number
+  monthlyMessages: number
+  activeTaskLimit: number | null
+  conversationLimit: number | null
+  documentStorageBytes: number
+}
+
+export interface PlanCatalog {
+  currentPlanKey: PlanDetails['key']
+  plans: PlanDetails[]
+}
+
 export interface UsageSummary {
   totals: {
     inputTokens: number

@@ -12,4 +12,6 @@ public interface TaskRepository extends JpaRepository<TaskEntity, UUID> {
 	List<TaskEntity> findAllByUserIdOrderByCreatedAtDesc(UUID userId);
 
 	Optional<TaskEntity> findByIdAndUserId(UUID id, UUID userId);
+
+	long countByUserIdAndCompletedFalse(UUID userId);
 }

@@ -7,11 +7,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.time.Instant;
 import java.util.UUID;
 
 public interface UsageRepository extends JpaRepository<UsageLogEntity, Long> {
 
 	List<UsageLogEntity> findTop100ByUserIdOrderByCreatedAtDesc(UUID userId);
+
+	long countByUserIdAndOperationAndCreatedAtGreaterThanEqual(UUID userId, String operation, Instant createdAt);
 
 	@Query("""
 			select new com.aetherai.usage.dto.UsageTotals(
