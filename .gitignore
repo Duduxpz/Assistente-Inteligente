@@ -1,0 +1,22 @@
+# Java / Maven
+target/
+*.class
+
+# Node.js / frontend
+node_modules/
+dist/
+coverage/
+npm-debug.log*
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and operating system
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
