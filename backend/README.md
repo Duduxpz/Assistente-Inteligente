@@ -17,8 +17,9 @@ API REST em Java 21 com Spring Boot 4.1.2 e Maven.
 
 O PostgreSQL precisa estar instalado e em execução. Crie o banco `aether_ai` e
 configure as variáveis de ambiente antes de iniciar a aplicação. O arquivo
-`.env.example` documenta os nomes esperados; ele não é carregado automaticamente
-pelo Spring Boot e não contém uma senha válida.
+`.env.example` documenta os nomes esperados e não contém uma senha válida. A
+aplicação carrega, quando existe, um arquivo local `backend/.env` no formato
+`CHAVE=valor`; esse arquivo é ignorado pelo Git.
 
 Exemplo no PowerShell, substituindo os valores pelos da sua instalação local:
 
@@ -28,6 +29,9 @@ $env:DB_USERNAME = 'aether_ai'
 $env:DB_PASSWORD = '<sua-senha-local>'
 mvn spring-boot:run
 ```
+
+Como alternativa, defina `DB_URL`, `DB_USERNAME` e `DB_PASSWORD` em
+`backend/.env` para carregá-los automaticamente ao iniciar a aplicação.
 
 O Flyway executa as migrations ao iniciar. O Hibernate valida o schema sem
 alterá-lo. Não use credenciais reais em arquivos versionados.
