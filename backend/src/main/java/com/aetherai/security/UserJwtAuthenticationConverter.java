@@ -35,6 +35,10 @@ public class UserJwtAuthenticationConverter implements Converter<Jwt, AbstractOA
 		UserEntity user = userRepository.findById(userId)
 				.filter(UserEntity::isEnabled)
 				.orElseThrow(() -> new BadCredentialsException("Account is unavailable."));
+		Number tokenSessionVersion = jwt.getClaim("sessionVersion");
+		if (tokenSessionVersion == null || tokenSessionVersion.intValue() != user.getSessionVersion()) {
+			throw new BadCredentialsException("Access token has been revoked.");
+		}
 		List<GrantedAuthority> authorities = user.getRoles().stream()
 				.map(role -> new SimpleGrantedAuthority("ROLE_" + role.getName()))
 				.map(GrantedAuthority.class::cast)

@@ -13,6 +13,12 @@ export class ApiError extends Error {
   }
 }
 
+function notifyUnauthorized(token: string | null | undefined) {
+  if (token && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('aether:unauthorized', { detail: token }))
+  }
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
@@ -36,6 +42,8 @@ export async function apiRequest<T>(
     )
   }
 
+  if (response.status === 401) notifyUnauthorized(token)
+
   const body = await response.text()
   let data: unknown
   if (body) {
@@ -47,7 +55,9 @@ export async function apiRequest<T>(
   }
 
   if (!response.ok) {
-    const message = typeof data === 'object' && data !== null && 'message' in data
+    const message = token && response.status === 401
+      ? 'Sua sessão expirou. Entre novamente para continuar.'
+      : typeof data === 'object' && data !== null && 'message' in data
       ? String(data.message)
       : `A requisição falhou (HTTP ${response.status}).`
     throw new ApiError(message, response.status)
@@ -124,6 +134,19 @@ export interface PlanCatalog {
   plans: PlanDetails[]
 }
 
+export interface BillingStatus {
+  planKey: PlanDetails['key']
+  subscriptionStatus: string | null
+  currentPeriodEnd: string | null
+  cancellationScheduled: boolean
+  testModeEnabled: boolean
+  testSubscription: boolean
+}
+
+export interface CheckoutResponse {
+  checkoutUrl: string
+}
+
 export interface UsageSummary {
   totals: {
     inputTokens: number
@@ -168,9 +191,13 @@ export async function apiDownload(path: string, token: string | null): Promise<B
     )
   }
 
+  if (response.status === 401) notifyUnauthorized(token)
+
   if (!response.ok) {
     const body = await response.text()
-    let message = `A requisição falhou (HTTP ${response.status}).`
+    let message = token && response.status === 401
+      ? 'Sua sessão expirou. Entre novamente para continuar.'
+      : `A requisição falhou (HTTP ${response.status}).`
     if (body) {
       try {
         const data: unknown = JSON.parse(body)

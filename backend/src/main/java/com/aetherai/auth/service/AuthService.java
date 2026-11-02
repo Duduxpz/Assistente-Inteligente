@@ -117,6 +117,7 @@ public class AuthService {
 				.subject(user.getId().toString())
 				.claim("email", user.getEmail())
 				.claim("roles", authorities)
+				.claim("sessionVersion", user.getSessionVersion())
 				.build();
 		String token = jwtEncoder.encode(JwtEncoderParameters.from(
 				JwsHeader.with(MacAlgorithm.HS256).build(),

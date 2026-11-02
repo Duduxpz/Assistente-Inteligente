@@ -1,6 +1,7 @@
 package com.aetherai.plan.service;
 
 import com.aetherai.common.exception.ApiException;
+import com.aetherai.billing.BillingService;
 import com.aetherai.plan.PlanTier;
 import com.aetherai.task.repository.TaskRepository;
 import com.aetherai.conversation.repository.ConversationRepository;
@@ -23,18 +24,21 @@ public class PlanLimitService {
 	private final ConversationRepository conversationRepository;
 	private final DocumentRepository documentRepository;
 	private final UsageRepository usageRepository;
+	private final BillingService billingService;
 
 	public PlanLimitService(
 			UserRepository userRepository,
 			TaskRepository taskRepository,
 			ConversationRepository conversationRepository,
 			DocumentRepository documentRepository,
-			UsageRepository usageRepository) {
+			UsageRepository usageRepository,
+			BillingService billingService) {
 		this.userRepository = userRepository;
 		this.taskRepository = taskRepository;
 		this.conversationRepository = conversationRepository;
 		this.documentRepository = documentRepository;
 		this.usageRepository = usageRepository;
+		this.billingService = billingService;
 	}
 
 	public void ensureCanSendMessage(UUID userId) {
@@ -81,6 +85,7 @@ public class PlanLimitService {
 	}
 
 	private PlanTier planFor(UUID userId) {
+		billingService.refreshPlanAccess(userId);
 		String planKey = userRepository.findById(userId)
 				.map(user -> user.getPlanKey())
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found."));

@@ -37,7 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 		"spring.datasource.username=sa",
 		"spring.datasource.password=",
 		"app.documents.storage-path=target/test-documents",
-		"security.jwt.secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+		"security.jwt.secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+		"ai.provider=none"
 })
 @AutoConfigureMockMvc
 class AuthAndTaskIntegrationTest {

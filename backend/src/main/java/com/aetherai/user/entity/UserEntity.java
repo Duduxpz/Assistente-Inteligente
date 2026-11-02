@@ -38,6 +38,9 @@ public class UserEntity {
 	@Column(name = "plan_key", nullable = false, length = 16)
 	private String planKey = "free";
 
+	@Column(name = "session_version", nullable = false)
+	private int sessionVersion;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
@@ -87,6 +90,19 @@ public class UserEntity {
 
 	public String getPlanKey() {
 		return planKey;
+	}
+
+	public void setPlanKey(String planKey) {
+		this.planKey = planKey;
+	}
+
+	public int getSessionVersion() {
+		return sessionVersion;
+	}
+
+	public void changePassword(String passwordHash) {
+		this.passwordHash = passwordHash;
+		this.sessionVersion++;
 	}
 
 	public void setEnabled(boolean enabled) {

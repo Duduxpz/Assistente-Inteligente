@@ -42,6 +42,9 @@ alterá-lo. Nunca use credenciais reais em arquivos versionados.
 ## Endpoints implementados
 
 - `POST /api/v1/auth/register` e `POST /api/v1/auth/login`: cadastro e login.
+- `GET /api/v1/auth/password-reset/status`: verifica se o envio de e-mail está configurado.
+- `POST /api/v1/auth/password-reset/request` e `/complete`: recuperação de senha
+  com token temporário de uso único.
 - `GET` e `PUT /api/v1/users/me`: perfil da conta autenticada.
 - `GET` e `PUT /api/v1/users/me/settings`: preferências da conta.
 - `GET`, `POST`, `PUT` e `DELETE /api/v1/tasks`: tarefas restritas ao usuário autenticado.
@@ -55,8 +58,14 @@ alterá-lo. Nunca use credenciais reais em arquivos versionados.
 
 O catálogo mensal atual é Free (R$ 0), Plus (R$ 25) e Ultra (R$ 100). Os limites
 por plano são aplicados pela API: mensagens de IA concluídas por mês, tarefas
-ativas, conversas e armazenamento total de documentos. A cobrança e a troca de
-plano ainda não estão conectadas a um gateway de pagamento.
+ativas, conversas e armazenamento total de documentos. A cobrança recorrente
+usa Mercado Pago; no perfil `dev`, os botões ativam uma assinatura de teste sem
+cobrança, válida por 30 dias e sem nenhuma rota equivalente em produção.
+
+Para deixar uma conta Ultra no banco H2 local, informe o e-mail cadastrado na
+variável `AETHER_TEST_ULTRA_EMAIL` em `backend/.env` e reinicie o backend com o
+perfil `dev`. O modo de teste exige o perfil `dev` sem o perfil `prod` e suas
+rotas não são registradas em produção.
 
 O token de acesso expira em 15 minutos por padrão. O cliente pode remover o token
 no logout; a invalidação imediata de tokens e refresh tokens ainda não foram
@@ -84,6 +93,65 @@ HTTP 503 e não grava uma resposta simulada.
 O modelo pode ser trocado por outro identificador disponível na conta do
 OpenRouter. O AETHER registra modelo e tokens somente após uma resposta válida;
 falhas do provedor não são salvas como mensagens.
+
+### Recuperação de senha com Resend
+
+1. Crie uma conta no [Resend](https://resend.com/) e cadastre/verifique um domínio
+   que você controla. O Resend não envia mensagens de produção de um domínio não
+   verificado.
+2. Gere uma API key no painel do Resend.
+3. Configure localmente em `backend/.env`:
+
+   ```dotenv
+   EMAIL_PROVIDER=resend
+   RESEND_API_KEY=sua-chave-local
+   RESEND_FROM=AETHER AI <conta@seu-dominio.com>
+   FRONTEND_BASE_URL=http://localhost:5173
+   ```
+
+4. Reinicie o backend. A tela **Esqueci minha senha** só oferece o formulário
+   de envio quando o provedor está configurado.
+
+O token de recuperação é aleatório, armazenado somente como hash, expira em 30
+minutos e pode ser usado uma vez. Redefinir a senha revoga imediatamente os
+tokens de acesso já emitidos. A API não revela se o e-mail informado pertence
+a uma conta.
+
+### Assinaturas com Mercado Pago
+
+A cobrança mensal está integrada ao endpoint oficial de assinaturas (`/preapproval`).
+O plano da conta só é atualizado após um webhook com assinatura HMAC válida e
+uma consulta servidor-servidor ao Mercado Pago. O retorno do navegador nunca
+ativa o plano. O cancelamento interrompe a renovação, preservando o acesso até
+o fim do período informado pelo provedor.
+
+1. Crie uma aplicação em [Suas integrações do Mercado Pago](https://www.mercadopago.com.br/developers/panel/app)
+   e use primeiro as credenciais de teste.
+2. Configure no arquivo local `backend/.env` (não compartilhe esses valores):
+
+   ```dotenv
+   MERCADOPAGO_ACCESS_TOKEN=seu-access-token-de-teste
+   MERCADOPAGO_WEBHOOK_SECRET=sua-chave-secreta-de-webhook
+   FRONTEND_BASE_URL=http://localhost:5173
+   ```
+
+3. Publique o backend em uma URL HTTPS acessível pelo Mercado Pago. Cadastre
+   `https://seu-dominio/api/v1/billing/webhooks/mercadopago` como URL de webhook
+   e habilite o evento **subscription_preapproval**.
+4. Copie a assinatura secreta gerada para `MERCADOPAGO_WEBHOOK_SECRET` e
+   reinicie o backend.
+5. Teste checkout, confirmação, cancelamento e expiração com contas e cartões
+   de teste antes de configurar credenciais de produção.
+
+As opções de assinatura dos planos Plus e Ultra criam cobrança recorrente
+mensal em BRL. Para reduzir a possibilidade de duplicidade, uma conta não pode
+abrir outra assinatura enquanto houver pagamento pendente ou período pago
+ativo. A expiração é aplicada ao consultar o plano ou utilizar recursos
+limitados; a infraestrutura atual não executa tarefas agendadas.
+
+Sem credenciais, checkout retorna erro explícito e não simula pagamento. Não
+coloque tokens do Mercado Pago, chaves de webhook ou credenciais de teste no
+Git nem envie esses segredos pelo chat.
 
 O perfil de administrador não pode ser atribuído pelo cadastro público; a
 concessão inicial exige uma operação administrativa controlada no banco. A

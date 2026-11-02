@@ -18,10 +18,10 @@ PostgreSQL real fica para a etapa final.
   o envio retorna erro explícito e nenhuma resposta fictícia é produzida.
 - Preferência de tema escuro, claro ou sincronizado com o sistema, salva na conta.
 
-Recuperação de senha ainda depende de infraestrutura de e-mail. Veja
-[backend/README.md](./backend/README.md) para conectar o OpenRouter com uma chave
-local que não deve ser compartilhada ou versionada. Os preços dos planos são
-informativos; checkout e troca automática de plano ainda não estão ativados.
+Recuperação de senha e checkout recorrente via Mercado Pago estão implementados.
+No perfil local `dev`, os planos podem ser ativados em modo de teste sem
+cobrança; pagamentos reais dependem de credenciais e configuração do Mercado
+Pago. Consulte [backend/README.md](./backend/README.md) para os passos.
 
 ## Requisitos
 

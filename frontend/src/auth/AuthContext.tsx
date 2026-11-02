@@ -2,8 +2,20 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { ApiError, apiRequest, login as loginRequest, register as registerRequest, type AuthUser } from '../lib/api'
 import { AuthContext, type AuthContextValue } from './context'
 
+const accessTokenKey = 'aether.accessToken'
+
+function getStoredAccessToken() {
+  const sessionToken = sessionStorage.getItem(accessTokenKey)
+  if (sessionToken) {
+    localStorage.setItem(accessTokenKey, sessionToken)
+    sessionStorage.removeItem(accessTokenKey)
+    return sessionToken
+  }
+  return localStorage.getItem(accessTokenKey)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('aether.accessToken'))
+  const [token, setToken] = useState<string | null>(getStoredAccessToken)
   const [user, setUser] = useState<AuthContextValue['user']>(null)
   const [resolvedToken, setResolvedToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -11,12 +23,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loading = Boolean(token && resolvedToken !== token)
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem('aether.accessToken')
+    localStorage.removeItem(accessTokenKey)
+    sessionStorage.removeItem(accessTokenKey)
     setToken(null)
     setUser(null)
     setError(null)
     setResolvedToken(null)
   }, [])
+
+  useEffect(() => {
+    function handleUnauthorized(event: Event) {
+      if (event instanceof CustomEvent && event.detail === token) logout()
+    }
+
+    window.addEventListener('aether:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('aether:unauthorized', handleUnauthorized)
+  }, [logout, token])
 
   const reloadUser = useCallback(() => {
     setError(null)
@@ -46,7 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((requestError: unknown) => {
         if (!active) return
         if (requestError instanceof ApiError && requestError.status === 401) {
-          sessionStorage.removeItem('aether.accessToken')
+          localStorage.removeItem(accessTokenKey)
+          sessionStorage.removeItem(accessTokenKey)
           setToken(null)
           setUser(null)
         } else {
@@ -63,7 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const authenticate = useCallback(async (result: ReturnType<typeof loginRequest>) => {
     const auth = await result
-    sessionStorage.setItem('aether.accessToken', auth.accessToken)
+    localStorage.setItem(accessTokenKey, auth.accessToken)
+    sessionStorage.removeItem(accessTokenKey)
     setToken(auth.accessToken)
     setResolvedToken(auth.accessToken)
     setUser(auth.user)

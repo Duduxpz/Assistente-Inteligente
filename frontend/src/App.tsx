@@ -34,14 +34,20 @@ import {
   X,
 } from 'lucide-react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { AuthPage } from './auth/AuthPage'
+import { PasswordRecoveryPage } from './auth/PasswordRecoveryPage'
 import { useAuth } from './auth/useAuth'
 import {
   apiDownload,
   apiRequest,
+  ApiError,
   type AdminUser,
   type AdminUserPage,
+  type BillingStatus,
   type ChatMessage,
+  type CheckoutResponse,
   type Conversation,
   type DocumentItem,
   type PlanCatalog,
@@ -101,6 +107,8 @@ function App() {
       <Route path="/login" element={<AuthPage mode="login" />} />
       <Route path="/admin/login" element={<AuthPage mode="admin" />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
+      <Route path="/forgot-password" element={<PasswordRecoveryPage mode="request" />} />
+      <Route path="/reset-password" element={<PasswordRecoveryPage mode="reset" />} />
       <Route path="/*" element={<RequireAuthentication><ApplicationShell /></RequireAuthentication>} />
     </Routes>
   )
@@ -313,24 +321,30 @@ function ApplicationShell() {
               path="/"
               element={(
                 <Dashboard
-                  aiConfigured={aiConfigured}
-                  aiStatusError={aiStatusError}
                   onStartConversation={startConversation}
                 />
               )}
             />
-            <Route path="/chat" element={<ChatPage />} />
+            <Route
+              path="/chat"
+              element={<ChatPage aiConfigured={aiConfigured} aiStatusError={aiStatusError} />}
+            />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/plans" element={<PlansPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/admin" element={<RequireAdmin><AdminPage /></RequireAdmin>} />
+            <Route
+              path="/admin"
+              element={(
+                <RequireAdmin>
+                  <AdminPage aiConfigured={aiConfigured} />
+                </RequireAdmin>
+              )}
+            />
             <Route
               path="*"
               element={(
                 <Dashboard
-                  aiConfigured={aiConfigured}
-                  aiStatusError={aiStatusError}
                   onStartConversation={startConversation}
                 />
               )}
@@ -349,12 +363,8 @@ function RequireAdmin({ children }: { children: ReactNode }) {
 
 function Dashboard({
   onStartConversation,
-  aiConfigured,
-  aiStatusError,
 }: {
   onStartConversation: () => void
-  aiConfigured: boolean | null
-  aiStatusError: string
 }) {
   const { token } = useAuth()
   const navigate = useNavigate()
@@ -408,19 +418,6 @@ function Dashboard({
         </div>
       </section>
 
-      <section className="connection-notice" aria-label="Status da integração">
-        <span className="notice-icon"><ShieldAlert size={18} /></span>
-        <div className="notice-copy">
-          <strong>{aiConfigured ? 'A integração com IA está pronta' : 'A integração com IA ainda não está configurada'}</strong>
-          <span>
-            {aiConfigured
-              ? 'As respostas serão geradas pelo provedor configurado.'
-              : 'Nenhuma resposta será simulada. Configure sua chave OpenRouter para conversar por aqui.'}
-          </span>
-        </div>
-        <span className="notice-status">{aiConfigured ? 'CONECTADA' : 'EM CONFIGURAÇÃO'}</span>
-      </section>
-      {aiStatusError && <p className="dashboard-data-error" role="status">{aiStatusError}</p>}
       {statsError && <p className="dashboard-data-error" role="status">{statsError}</p>}
       {stats && (
         <section className="dashboard-stats" aria-label="Resumo da conta">
@@ -470,7 +467,7 @@ function Dashboard({
 
       <section className="bottom-note">
         <span className="bottom-note-icon"><Sparkles size={15} /></span>
-        <p>Estamos preparando seu espaço. <strong>Suas conversas e arquivos ainda não estão conectados.</strong></p>
+        <p>Seu workspace está conectado. <strong>Conversas, tarefas e documentos ficam associados à sua conta.</strong></p>
         <span className="bottom-note-decoration"><ArrowDown size={15} /></span>
       </section>
     </div>
@@ -505,7 +502,13 @@ function FeatureCard({
   )
 }
 
-function ChatPage() {
+function ChatPage({
+  aiConfigured,
+  aiStatusError,
+}: {
+  aiConfigured: boolean | null
+  aiStatusError: string
+}) {
   const { token } = useAuth()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
@@ -520,7 +523,10 @@ function ChatPage() {
     let active = true
     void apiRequest<Conversation[]>('/conversations', {}, token)
       .then((items) => {
-        if (active) setConversations(items)
+        if (active) {
+          setConversations(items)
+          setSelectedConversation(items[0] ?? null)
+        }
       })
       .catch((error: unknown) => {
         if (active) setNotice(error instanceof Error ? error.message : 'Não foi possível carregar as conversas.')
@@ -548,7 +554,7 @@ function ChatPage() {
     return () => { active = false }
   }, [selectedConversation, token])
 
-  async function createConversation() {
+  async function createConversation(): Promise<Conversation | null> {
     setNotice('')
     try {
       const conversation = await apiRequest<Conversation>('/conversations', {
@@ -559,8 +565,10 @@ function ChatPage() {
       setSelectedConversation(conversation)
       setMessages([])
       setMessagesConversationId(conversation.id)
+      return conversation
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível criar a conversa.')
+      return null
     }
   }
 
@@ -592,17 +600,19 @@ function ChatPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft.trim() || !selectedConversation || sending) return
+    if (!draft.trim() || sending) return
     setSending(true)
     setNotice('')
     try {
+      const conversation = selectedConversation ?? await createConversation()
+      if (!conversation) return
       const result = await apiRequest<{ messages: ChatMessage[] }>(
-        `/conversations/${selectedConversation.id}/messages`,
+        `/conversations/${conversation.id}/messages`,
         { method: 'POST', body: JSON.stringify({ content: draft.trim() }) },
         token,
       )
       setMessages(result.messages)
-      setMessagesConversationId(selectedConversation.id)
+      setMessagesConversationId(conversation.id)
       setDraft('')
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível enviar a mensagem.')
@@ -624,14 +634,6 @@ function ChatPage() {
           <Plus size={16} /> Nova conversa
         </button>
       </div>
-      <div className="chat-unavailable">
-        <span className="notice-icon"><ShieldAlert size={18} /></span>
-        <div className="notice-copy">
-          <strong>A integração com IA está aguardando configuração</strong>
-          <span>Suas conversas ficam salvas. Mensagens não serão enviadas ao provedor até uma integração real ser configurada.</span>
-        </div>
-      </div>
-
       <div className="conversation-layout">
         <aside className="conversation-list" aria-label="Histórico de conversas">
           <div className="conversation-list-heading">
@@ -691,13 +693,19 @@ function ChatPage() {
               <div className="chat-empty-state">
                 <Sparkles size={21} />
                 <strong>Esta conversa está pronta</strong>
-                <span>Quando um provedor real estiver configurado, suas mensagens aparecerão aqui.</span>
+                <span>Envie uma mensagem para conversar com o provedor conectado.</span>
               </div>
             )}
             {messagesConversationId === selectedConversation?.id && messages.map((message) => (
               <article className={`message-bubble message-${message.role}`} key={message.id}>
                 <span>{message.role === 'user' ? 'Você' : 'AETHER AI'}</span>
-                <p>{message.content}</p>
+                {message.role === 'assistant'
+                  ? (
+                    <div className="markdown-content">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                    </div>
+                  )
+                  : <p>{message.content}</p>}
               </article>
             ))}
           </div>
@@ -707,16 +715,23 @@ function ChatPage() {
               id="message-draft"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder={selectedConversation ? 'Escreva uma mensagem...' : 'Crie ou selecione uma conversa...'}
+              placeholder={selectedConversation
+                ? 'Escreva uma mensagem...'
+                : 'Escreva sua mensagem; criaremos uma conversa ao enviar...'}
               rows={3}
-              disabled={!selectedConversation}
             />
             <div className="composer-footer">
-              <span className="composer-hint">Mensagens não são simuladas; o provedor ainda não está conectado.</span>
+              <span className="composer-hint">
+                {aiConfigured
+                  ? 'Sua mensagem será enviada ao provedor conectado.'
+                  : aiConfigured === false
+                    ? 'Você pode escrever; conecte um provedor para receber respostas.'
+                    : aiStatusError || 'Verificando a conexão do provedor...'}
+              </span>
               <button
                 className="send-button"
                 type="submit"
-                disabled={!draft.trim() || !selectedConversation || sending}
+                disabled={!draft.trim() || sending}
                 aria-label="Enviar mensagem"
               >
                 {sending ? <LoaderCircle size={16} className="spin-icon" /> : <Send size={16} />}
@@ -726,7 +741,7 @@ function ChatPage() {
         </div>
       </div>
       {notice && <p className="composer-notice" role="status">{notice}</p>}
-      <p className="chat-disclaimer">O histórico pertence à sua conta. A IA não gera respostas até um provedor real ser configurado.</p>
+      <p className="chat-disclaimer">O histórico pertence à sua conta. As respostas são geradas pelo provedor conectado.</p>
     </section>
   )
 }
@@ -1280,7 +1295,16 @@ function SettingsPage() {
 function PlansPage() {
   const { token } = useAuth()
   const [catalog, setCatalog] = useState<PlanCatalog | null>(null)
+  const [billing, setBilling] = useState<BillingStatus | null>(null)
   const [error, setError] = useState('')
+  const [billingError, setBillingError] = useState('')
+  const [billingUnavailable, setBillingUnavailable] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [notice, setNotice] = useState(() => new URLSearchParams(window.location.search).get('billing') === 'return'
+    ? 'Pagamento iniciado. O plano será atualizado após a confirmação segura do Mercado Pago.'
+    : '')
+  const [busy, setBusy] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -1294,8 +1318,88 @@ function PlansPage() {
       .catch((requestError: unknown) => {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os planos.')
       })
+    void apiRequest<BillingStatus>('/billing', {}, token)
+      .then((response) => {
+        if (active) {
+          setBilling(response)
+          setBillingError('')
+          setBillingUnavailable(false)
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setBilling(null)
+          if (requestError instanceof ApiError && requestError.status === 404) {
+            setBillingUnavailable(true)
+            setBillingError('')
+          } else {
+            setBillingUnavailable(false)
+            setBillingError(requestError instanceof Error
+              ? requestError.message
+              : 'Não foi possível consultar o status da assinatura.')
+          }
+        }
+      })
     return () => { active = false }
-  }, [token])
+  }, [token, refreshKey])
+
+  async function beginCheckout(planKey: PlanCatalog['plans'][number]['key']) {
+    setBusy(true)
+    setActionError('')
+    setNotice('')
+    try {
+      if (billing?.testModeEnabled) {
+        const response = await apiRequest<BillingStatus>('/billing/test/activate', {
+          method: 'POST',
+          body: JSON.stringify({ planKey }),
+        }, token)
+        setBilling(response)
+        setRefreshKey((value) => value + 1)
+        const planName = catalog?.plans.find((plan) => plan.key === planKey)?.name ?? planKey
+        setNotice(`${planName} ativado para testes por 30 dias. Nenhuma cobrança foi realizada.`)
+        setBusy(false)
+        return
+      }
+
+      const response = await apiRequest<CheckoutResponse>('/billing/checkout', {
+        method: 'POST',
+        body: JSON.stringify({ planKey }),
+      }, token)
+      const checkoutUrl = new URL(response.checkoutUrl)
+      if (checkoutUrl.protocol !== 'https:'
+        || !(checkoutUrl.hostname === 'mercadopago.com.br' || checkoutUrl.hostname.endsWith('.mercadopago.com.br'))) {
+        throw new Error('O Mercado Pago retornou um endereço de pagamento inválido.')
+      }
+      window.location.assign(checkoutUrl.toString())
+    } catch (requestError) {
+      setActionError(requestError instanceof Error ? requestError.message : 'Não foi possível iniciar o pagamento.')
+      setBusy(false)
+    }
+  }
+
+  async function cancelRenewal() {
+    if (!window.confirm('Deseja cancelar a renovação? Seu plano pago continuará ativo até o fim do período já pago.')) return
+    setBusy(true)
+    setActionError('')
+    setNotice('')
+    try {
+      const endpoint = billing?.testSubscription ? '/billing/test/cancel' : '/billing/cancel'
+      const response = await apiRequest<BillingStatus>(endpoint, { method: 'POST' }, token)
+      setBilling(response)
+      setRefreshKey((value) => value + 1)
+      setNotice(response.cancellationScheduled
+        ? response.testSubscription
+          ? 'Plano de teste cancelado. Seu acesso continua até o fim do período de teste.'
+          : 'Renovação cancelada. Seu plano continuará ativo até o fim do período pago.'
+        : response.testSubscription
+        ? 'Plano de teste cancelado. Nenhuma cobrança foi realizada.'
+        : 'Assinatura pendente cancelada. Nenhum plano pago foi ativado.')
+    } catch (requestError) {
+      setActionError(requestError instanceof Error ? requestError.message : 'Não foi possível cancelar a renovação.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <section className="plans-page">
@@ -1307,6 +1411,37 @@ function PlansPage() {
         </div>
       </div>
       {error && <p className="tasks-error" role="alert"><AlertCircle size={15} />{error}</p>}
+      {actionError && <p className="tasks-error" role="alert"><AlertCircle size={15} />{actionError}</p>}
+      {billingError && <p className="tasks-error" role="alert"><AlertCircle size={15} />Status de cobrança indisponível: {billingError}</p>}
+      {billingUnavailable && (
+        <p className="plan-billing-alert" role="status">
+          Os planos estão disponíveis, mas a cobrança requer reiniciar o backend com a versão mais recente.
+        </p>
+      )}
+      {notice && <p className="plan-billing-alert" role="status">{notice}</p>}
+      {billing?.testModeEnabled && (
+        <p className="plan-billing-alert" role="status">
+          Modo de testes: ativar um plano não gera cobrança e libera o acesso por 30 dias.
+        </p>
+      )}
+      {billing?.cancellationScheduled && billing.currentPeriodEnd && (
+        <p className="plan-billing-alert" role="status">
+          Renovação cancelada. Acesso ao plano até {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' }).format(new Date(billing.currentPeriodEnd))}.
+        </p>
+      )}
+      {(billing?.subscriptionStatus === 'authorized'
+        || billing?.subscriptionStatus === 'pending'
+        || billing?.subscriptionStatus === 'paused') && (
+        <button className="auth-secondary plan-cancel-button" disabled={busy} onClick={() => void cancelRenewal()} type="button">
+          {busy
+            ? 'Processando...'
+            : billing.testSubscription
+            ? 'Cancelar plano de teste'
+            : billing.subscriptionStatus === 'pending'
+            ? 'Cancelar pagamento pendente'
+            : 'Cancelar renovação'}
+        </button>
+      )}
       {!catalog && !error && <p className="task-list-empty"><LoaderCircle size={16} className="spin-icon" /> Carregando planos...</p>}
       {catalog && (
         <div className="plan-grid">
@@ -1320,6 +1455,10 @@ function PlansPage() {
             const conversationLimit = plan.conversationLimit === null
               ? 'Conversas ilimitadas'
               : `${plan.conversationLimit} ${plan.conversationLimit === 1 ? 'conversa' : 'conversas'}`
+            const subscriptionInProgress = billing?.subscriptionStatus === 'pending'
+            const hasPaidSubscription = !billing?.testSubscription && (billing?.subscriptionStatus === 'authorized'
+              || billing?.subscriptionStatus === 'paused'
+              || billing?.cancellationScheduled === true)
 
             return (
               <article className={`plan-card ${isCurrent ? 'plan-card-current' : ''}`} key={plan.key}>
@@ -1336,8 +1475,22 @@ function PlansPage() {
                   <li><Check size={15} />{conversationLimit}</li>
                   <li><Check size={15} />{formatBytes(plan.documentStorageBytes)} de documentos</li>
                 </ul>
-                <button className="plan-action" disabled type="button">
-                  {isCurrent ? 'Plano atual' : 'Upgrade em breve'}
+                <button
+                  className="plan-action"
+                  disabled={isCurrent || busy || billing === null || billingUnavailable || Boolean(billingError)
+                    || hasPaidSubscription || (subscriptionInProgress && billing?.planKey !== plan.key)}
+                  onClick={() => void beginCheckout(plan.key)}
+                  type="button"
+                >
+                  {isCurrent
+                    ? 'Plano atual'
+                    : busy
+                    ? 'Processando...'
+                    : subscriptionInProgress && billing?.planKey === plan.key
+                    ? 'Continuar pagamento'
+                    : billing?.testModeEnabled
+                    ? 'Ativar plano de teste'
+                    : 'Assinar plano'}
                 </button>
               </article>
             )
@@ -1345,13 +1498,15 @@ function PlansPage() {
         </div>
       )}
       <p className="plan-billing-note">
-        Os limites são aplicados pela sua conta. A cobrança automática ainda não está ativada.
+        {billing?.testModeEnabled
+          ? 'Assinaturas de teste locais não geram cobrança e não estão disponíveis em produção.'
+          : 'Pagamentos recorrentes via Mercado Pago. O plano só muda após confirmação da assinatura.'}
       </p>
     </section>
   )
 }
 
-function AdminPage() {
+function AdminPage({ aiConfigured }: { aiConfigured: boolean | null }) {
   const { token } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [usage, setUsage] = useState<{ inputTokens: number; outputTokens: number; requests: number } | null>(null)
@@ -1399,6 +1554,18 @@ function AdminPage() {
           <p>Gerenciamento de contas e utilização da plataforma.</p>
         </div>
       </div>
+      <section className="connection-notice" aria-label="Status da integração">
+        <span className="notice-icon"><ShieldAlert size={18} /></span>
+        <div className="notice-copy">
+          <strong>{aiConfigured ? 'A integração com IA está pronta' : 'A integração com IA ainda não está configurada'}</strong>
+          <span>
+            {aiConfigured
+              ? 'As respostas serão geradas pelo provedor configurado.'
+              : 'Nenhuma resposta será simulada. Configure sua chave OpenRouter para conversar por aqui.'}
+          </span>
+        </div>
+        <span className="notice-status">{aiConfigured ? 'CONECTADA' : 'EM CONFIGURAÇÃO'}</span>
+      </section>
       {error && <p className="tasks-error" role="alert"><AlertCircle size={15} />{error}</p>}
       {usage && (
         <div className="admin-usage-card">

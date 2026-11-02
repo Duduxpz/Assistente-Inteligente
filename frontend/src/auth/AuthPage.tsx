@@ -136,6 +136,11 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'admin' }) {
             </button>
           </form>
 
+          {!isRegister && !isAdmin && (
+            <p className="auth-forgot-password">
+              <Link to="/forgot-password">Esqueci minha senha</Link>
+            </p>
+          )}
           <p className="auth-switch">
             {isRegister ? 'Já tem uma conta?' : isAdmin ? 'Acesso para usuários?' : 'Ainda não tem uma conta?'}
             {' '}
