@@ -12,6 +12,7 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+backend/data/
 
 # IDE and operating system
 .idea/

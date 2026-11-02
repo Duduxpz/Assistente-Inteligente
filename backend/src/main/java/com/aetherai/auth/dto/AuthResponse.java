@@ -2,5 +2,7 @@ package com.aetherai.auth.dto;
 
 import com.aetherai.user.dto.UserResponse;
 
-public record AuthResponse(String accessToken, String tokenType, long expiresIn, UserResponse user) {
+import java.time.Instant;
+
+public record AuthResponse(String accessToken, String tokenType, Instant expiresAt, UserResponse user) {
 }

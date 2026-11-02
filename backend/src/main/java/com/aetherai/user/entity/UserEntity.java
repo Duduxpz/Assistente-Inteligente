@@ -1,10 +1,5 @@
 package com.aetherai.user.entity;
 
-import java.time.OffsetDateTime;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -13,12 +8,19 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.UuidGenerator;
+
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 
 @Entity
 @Table(name = "users")
 public class UserEntity {
 
 	@Id
+	@UuidGenerator
 	private UUID id;
 
 	@Column(nullable = false, unique = true, length = 320)
@@ -31,15 +33,15 @@ public class UserEntity {
 	private String displayName;
 
 	@Column(nullable = false)
-	private boolean enabled;
+	private boolean enabled = true;
 
-	@Column(name = "created_at", nullable = false)
-	private OffsetDateTime createdAt;
+	@Column(name = "created_at", nullable = false, updatable = false)
+	private Instant createdAt;
 
 	@Column(name = "updated_at", nullable = false)
-	private OffsetDateTime updatedAt;
+	private Instant updatedAt;
 
-	@ManyToMany(fetch = FetchType.EAGER)
+	@ManyToMany(fetch = FetchType.LAZY)
 	@JoinTable(
 			name = "user_roles",
 			joinColumns = @JoinColumn(name = "user_id"),
@@ -49,17 +51,11 @@ public class UserEntity {
 	protected UserEntity() {
 	}
 
-	public static UserEntity create(String email, String passwordHash, String displayName, RoleEntity role) {
-		UserEntity user = new UserEntity();
-		user.id = UUID.randomUUID();
-		user.email = email;
-		user.passwordHash = passwordHash;
-		user.displayName = displayName;
-		user.enabled = true;
-		user.createdAt = OffsetDateTime.now();
-		user.updatedAt = user.createdAt;
-		user.roles.add(role);
-		return user;
+	public UserEntity(String email, String passwordHash, String displayName, RoleEntity role) {
+		this.email = email;
+		this.passwordHash = passwordHash;
+		this.displayName = displayName;
+		this.roles.add(role);
 	}
 
 	public UUID getId() {
@@ -78,15 +74,31 @@ public class UserEntity {
 		return displayName;
 	}
 
+	public void setDisplayName(String displayName) {
+		this.displayName = displayName;
+	}
+
 	public boolean isEnabled() {
 		return enabled;
 	}
 
-	public OffsetDateTime getCreatedAt() {
-		return createdAt;
+	public void setEnabled(boolean enabled) {
+		this.enabled = enabled;
 	}
 
 	public Set<RoleEntity> getRoles() {
 		return Set.copyOf(roles);
+	}
+
+	@jakarta.persistence.PrePersist
+	void onCreate() {
+		Instant now = Instant.now();
+		createdAt = now;
+		updatedAt = now;
+	}
+
+	@jakarta.persistence.PreUpdate
+	void onUpdate() {
+		updatedAt = Instant.now();
 	}
 }
