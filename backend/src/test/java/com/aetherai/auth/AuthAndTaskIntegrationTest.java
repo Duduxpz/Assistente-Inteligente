@@ -167,6 +167,57 @@ class AuthAndTaskIntegrationTest {
 	}
 
 	@Test
+	void refreshTokensRotateAndLogoutRevokesTheSession() throws Exception {
+		String email = "refresh-" + UUID.randomUUID() + "@example.com";
+		MvcResult registration = mockMvc.perform(post("/api/v1/auth/register")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(registerRequest(email)))
+				.andExpect(status().isCreated())
+				.andReturn();
+		String accessToken = JsonPath.read(registration.getResponse().getContentAsString(), "$.accessToken");
+		String firstRefreshToken = registration.getResponse().getCookie("aether_refresh").getValue();
+
+		MvcResult refresh = mockMvc.perform(post("/api/v1/auth/refresh")
+						.cookie(new jakarta.servlet.http.Cookie("aether_refresh", firstRefreshToken)))
+				.andExpect(status().isOk())
+				.andReturn();
+		String rotatedAccessToken = JsonPath.read(refresh.getResponse().getContentAsString(), "$.accessToken");
+		String rotatedRefreshToken = refresh.getResponse().getCookie("aether_refresh").getValue();
+		assertNotEquals(firstRefreshToken, rotatedRefreshToken);
+
+		mockMvc.perform(post("/api/v1/auth/refresh")
+						.cookie(new jakarta.servlet.http.Cookie("aether_refresh", firstRefreshToken)))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/v1/auth/refresh")
+						.cookie(new jakarta.servlet.http.Cookie("aether_refresh", rotatedRefreshToken)))
+				.andExpect(status().isUnauthorized());
+
+		MvcResult login = mockMvc.perform(post("/api/v1/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"a-secure-test-password-123"}
+								""".formatted(email)))
+				.andExpect(status().isOk())
+				.andReturn();
+		String currentAccessToken = JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
+		String currentRefreshToken = login.getResponse().getCookie("aether_refresh").getValue();
+
+		mockMvc.perform(post("/api/v1/auth/logout")
+						.header("Authorization", bearer(currentAccessToken)))
+				.andExpect(status().isNoContent())
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+						.cookie().maxAge("aether_refresh", 0));
+		mockMvc.perform(get("/api/v1/tasks")
+						.header("Authorization", bearer(currentAccessToken)))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/v1/auth/refresh")
+						.cookie(new jakarta.servlet.http.Cookie("aether_refresh", currentRefreshToken)))
+				.andExpect(status().isUnauthorized());
+		assertNotEquals("", rotatedAccessToken);
+		assertNotEquals("", accessToken);
+	}
+
+	@Test
 	void actuatorInfoRequiresAuthenticationAndReturnsApplicationMetadata() throws Exception {
 		mockMvc.perform(get("/actuator/info"))
 				.andExpect(status().isUnauthorized());

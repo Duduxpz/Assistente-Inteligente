@@ -38,6 +38,7 @@ public class AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final AuthenticationManager authenticationManager;
 	private final JwtEncoder jwtEncoder;
+	private final RefreshTokenService refreshTokenService;
 	private final Duration tokenTtl;
 	private final Clock clock;
 
@@ -47,18 +48,20 @@ public class AuthService {
 			PasswordEncoder passwordEncoder,
 			AuthenticationManager authenticationManager,
 			JwtEncoder jwtEncoder,
+			RefreshTokenService refreshTokenService,
 			@Value("${security.jwt.ttl:PT15M}") Duration tokenTtl) {
 		this.userRepository = userRepository;
 		this.roleRepository = roleRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.authenticationManager = authenticationManager;
 		this.jwtEncoder = jwtEncoder;
+		this.refreshTokenService = refreshTokenService;
 		this.tokenTtl = tokenTtl;
 		this.clock = Clock.systemUTC();
 	}
 
 	@Transactional
-	public AuthResponse register(RegisterRequest request) {
+	public AuthSession register(RegisterRequest request) {
 		String email = normalizeEmail(request.email());
 		if (userRepository.existsByEmail(email)) {
 			throw new ApiException(HttpStatus.CONFLICT, "An account with this email already exists.");
@@ -71,11 +74,11 @@ public class AuthService {
 				passwordEncoder.encode(request.password()),
 				request.displayName().trim(),
 				userRole));
-		return issueToken(user);
+		return issueSession(user);
 	}
 
-	@Transactional(readOnly = true)
-	public AuthResponse login(LoginRequest request) {
+	@Transactional
+	public AuthSession login(LoginRequest request) {
 		String email = normalizeEmail(request.email());
 		try {
 			authenticationManager.authenticate(
@@ -86,7 +89,22 @@ public class AuthService {
 
 		UserEntity user = userRepository.findByEmail(email)
 				.orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid email or password."));
-		return issueToken(user);
+		return issueSession(user);
+	}
+
+	@Transactional(noRollbackFor = ApiException.class)
+	public AuthSession refresh(String refreshToken) {
+		RefreshTokenService.RotatedRefreshToken rotated = refreshTokenService.rotate(refreshToken);
+		return issueSession(rotated.user(), rotated.refreshToken());
+	}
+
+	@Transactional
+	public void logout(UUID userId) {
+		UserEntity user = userRepository.findByIdForUpdate(userId)
+				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found."));
+		refreshTokenService.revokeAll(userId);
+		user.revokeSessions();
+		userRepository.save(user);
 	}
 
 	@Transactional(readOnly = true)
@@ -104,7 +122,11 @@ public class AuthService {
 		return UserResponse.from(userRepository.save(user));
 	}
 
-	private AuthResponse issueToken(UserEntity user) {
+	private AuthSession issueSession(UserEntity user) {
+		return issueSession(user, refreshTokenService.issue(user.getId()));
+	}
+
+	private AuthSession issueSession(UserEntity user, RefreshTokenService.IssuedRefreshToken refreshToken) {
 		Instant issuedAt = clock.instant();
 		Instant expiresAt = issuedAt.plus(tokenTtl);
 		String[] authorities = user.getRoles().stream()
@@ -123,10 +145,16 @@ public class AuthService {
 				JwsHeader.with(MacAlgorithm.HS256).build(),
 				claims)).getTokenValue();
 
-		return new AuthResponse(token, "Bearer", expiresAt, UserResponse.from(user));
+		return new AuthSession(
+				new AuthResponse(token, "Bearer", expiresAt, UserResponse.from(user)),
+				refreshToken.token(),
+				refreshToken.expiresAt());
 	}
 
 	private String normalizeEmail(String email) {
 		return email.trim().toLowerCase(Locale.ROOT);
+	}
+
+	public record AuthSession(AuthResponse response, String refreshToken, Instant refreshTokenExpiresAt) {
 	}
 }

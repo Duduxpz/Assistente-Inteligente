@@ -133,7 +133,9 @@ function RequireAuthentication({ children }: { children: ReactNode }) {
           <h1>Não foi possível carregar sua conta.</h1>
           <p>{error ?? 'Verifique se o backend está em execução e tente novamente.'}</p>
           <button className="auth-submit" onClick={() => void reloadUser()} type="button">Tentar novamente</button>
-          <button className="auth-secondary" onClick={logout} type="button">Sair da conta</button>
+          <button className="auth-secondary" onClick={() => void logout().catch(() => undefined)} type="button">
+            Sair da conta
+          </button>
         </div>
       </main>
     )
@@ -144,6 +146,7 @@ function RequireAuthentication({ children }: { children: ReactNode }) {
 function ApplicationShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [themeError, setThemeError] = useState('')
+  const [logoutError, setLogoutError] = useState('')
   const [aiConfigured, setAIConfigured] = useState<boolean | null>(null)
   const [aiStatusError, setAiStatusError] = useState('')
   const location = useLocation()
@@ -188,6 +191,17 @@ function ApplicationShell() {
   function startConversation() {
     setMobileMenuOpen(false)
     navigate('/chat')
+  }
+
+  async function handleLogout() {
+    setLogoutError('')
+    try {
+      await logout()
+    } catch (requestError) {
+      setLogoutError(requestError instanceof Error
+        ? requestError.message
+        : 'Não foi possível encerrar a sessão.')
+    }
   }
 
   return (
@@ -261,10 +275,11 @@ function ApplicationShell() {
               <strong>{user?.displayName}</strong>
               <span>{user?.email}</span>
             </span>
-            <button className="logout-button" onClick={logout} type="button" aria-label="Sair da conta" title="Sair">
+            <button className="logout-button" onClick={() => void handleLogout()} type="button" aria-label="Sair da conta" title="Sair">
               <LogOut size={15} />
             </button>
           </div>
+          {logoutError && <p className="workspace-plan-error" role="alert">{logoutError}</p>}
         </div>
       </aside>
 

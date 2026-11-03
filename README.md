@@ -31,7 +31,7 @@ documentos, desenvolvido com Spring Boot e React.
 | Backend | Java 21, Spring Boot, Maven, Spring Security, Spring Data JPA, Flyway |
 | Frontend | React, TypeScript, Vite, Tailwind CSS |
 | Banco | H2 no perfil `dev`; PostgreSQL no perfil padrão/produção |
-| Testes | JUnit, Spring Boot Test, H2; Oxlint, TypeScript e Vite |
+| Testes | JUnit, Spring Boot Test, H2; Vitest, Testing Library, Oxlint, TypeScript e Vite |
 | Integrações | OpenRouter, Resend e Mercado Pago (opcionais) |
 
 ## Arquitetura
@@ -135,7 +135,7 @@ npm run build
 - [x] Autenticação, tarefas, conversas, documentos e planos.
 - [x] Integrações opcionais de IA, recuperação de senha e cobrança recorrente.
 - [x] CI, testes automatizados do frontend e cobertura de segurança/limites.
-- [ ] Docker Compose, perfil PostgreSQL de produção e observabilidade.
+- [x] Docker Compose, perfil PostgreSQL de produção, Actuator e logs estruturados.
 - [ ] Rate limiting, refresh tokens e controles adicionais de segurança/LGPD.
 - [ ] Streaming de chat, UX aprimorada e RAG com documentos.
 - [ ] Modelos por plano, métricas administrativas, E2E e documentação de contribuição.

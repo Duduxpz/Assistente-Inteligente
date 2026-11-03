@@ -31,6 +31,7 @@ public class PasswordResetService {
 	private final UserRepository userRepository;
 	private final PasswordResetTokenRepository tokenRepository;
 	private final PasswordEncoder passwordEncoder;
+	private final RefreshTokenService refreshTokenService;
 	private final ObjectProvider<TransactionalEmailSender> emailSender;
 	private final EmailProviderProperties emailProperties;
 
@@ -38,11 +39,13 @@ public class PasswordResetService {
 			UserRepository userRepository,
 			PasswordResetTokenRepository tokenRepository,
 			PasswordEncoder passwordEncoder,
+			RefreshTokenService refreshTokenService,
 			ObjectProvider<TransactionalEmailSender> emailSender,
 			EmailProviderProperties emailProperties) {
 		this.userRepository = userRepository;
 		this.tokenRepository = tokenRepository;
 		this.passwordEncoder = passwordEncoder;
+		this.refreshTokenService = refreshTokenService;
 		this.emailSender = emailSender;
 		this.emailProperties = emailProperties;
 	}
@@ -102,6 +105,7 @@ public class PasswordResetService {
 				.orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "O link de redefinição é inválido ou expirou."));
 		user.changePassword(passwordEncoder.encode(newPassword));
 		userRepository.save(user);
+		refreshTokenService.revokeAll(user.getId());
 		resetToken.markUsed(Instant.now());
 		tokenRepository.save(resetToken);
 		tokenRepository.deleteAllByUserId(user.getId());

@@ -92,6 +92,7 @@ public class SecurityConfiguration {
 				HttpMethod.DELETE.name(),
 				HttpMethod.OPTIONS.name()));
 		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+		configuration.setAllowCredentials(true);
 		configuration.setMaxAge(3600L);
 
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -106,12 +107,16 @@ public class SecurityConfiguration {
 		return http
 				.csrf(AbstractHttpConfigurer::disable)
 				.cors(Customizer.withDefaults())
+				.headers(headers -> headers
+						.frameOptions(frame -> frame.deny())
+						.contentTypeOptions(Customizer.withDefaults()))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers(
 								"/api/v1/health",
 								"/api/v1/auth/register",
 								"/api/v1/auth/login",
+								"/api/v1/auth/refresh",
 								"/api/v1/auth/password-reset/**",
 								"/api/v1/billing/webhooks/mercadopago",
 								"/actuator/health",

@@ -11,7 +11,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.UUID;
 
 @Service
@@ -20,14 +24,17 @@ public class BillingService {
 	private final UserRepository userRepository;
 	private final SubscriptionRepository subscriptionRepository;
 	private final MercadoPagoGateway mercadoPagoGateway;
+	private final WebhookEventRepository webhookEventRepository;
 
 	public BillingService(
 			UserRepository userRepository,
 			SubscriptionRepository subscriptionRepository,
-			MercadoPagoGateway mercadoPagoGateway) {
+			MercadoPagoGateway mercadoPagoGateway,
+			WebhookEventRepository webhookEventRepository) {
 		this.userRepository = userRepository;
 		this.subscriptionRepository = subscriptionRepository;
 		this.mercadoPagoGateway = mercadoPagoGateway;
+		this.webhookEventRepository = webhookEventRepository;
 	}
 
 	@Transactional
@@ -107,10 +114,37 @@ public class BillingService {
 	}
 
 	@Transactional
-	public void processWebhook(String providerSubscriptionId) {
+	public void cancelForAccountDeletion(UUID userId) {
+		SubscriptionEntity subscription = subscriptionRepository.findById(userId).orElse(null);
+		if (subscription == null || subscription.getProviderSubscriptionId() == null
+				|| !Arrays.asList("pending", "authorized", "paused").contains(subscription.getStatus())) {
+			return;
+		}
+
+		MercadoPagoGateway.Subscription providerSubscription =
+				mercadoPagoGateway.cancelSubscription(subscription.getProviderSubscriptionId());
+		if (!"cancelled".equals(providerSubscription.status())
+				|| !subscription.getProviderSubscriptionId().equals(providerSubscription.id())
+				|| !userId.toString().equals(providerSubscription.externalReference())) {
+			throw new ApiException(HttpStatus.BAD_GATEWAY, "Não foi possível cancelar a assinatura antes de excluir a conta.");
+		}
+		UserEntity user = findUserForUpdate(userId);
+		updateFromProvider(subscription, user, providerSubscription);
+	}
+
+	@Transactional
+	public void processWebhook(String providerSubscriptionId, String requestId) {
+		if (requestId == null || requestId.isBlank() || requestId.length() > 128
+				|| providerSubscriptionId == null || providerSubscriptionId.isBlank()
+				|| providerSubscriptionId.length() > 80) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "O webhook contém identificadores inválidos.");
+		}
 		SubscriptionEntity subscription = subscriptionRepository
-				.findByProviderSubscriptionId(providerSubscriptionId)
+				.findByProviderSubscriptionIdForUpdate(providerSubscriptionId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Assinatura não encontrada."));
+		if (webhookEventRepository.existsByRequestIdAndResourceId(requestId, providerSubscriptionId)) {
+			return;
+		}
 		UserEntity user = findUserForUpdate(subscription.getUserId());
 		MercadoPagoGateway.Subscription providerSubscription =
 				mercadoPagoGateway.getSubscription(providerSubscriptionId);
@@ -121,6 +155,10 @@ public class BillingService {
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "A referência da assinatura não corresponde à conta.");
 		}
 		updateFromProvider(subscription, user, providerSubscription);
+		webhookEventRepository.save(new WebhookEventEntity(
+				webhookEventKey(requestId, providerSubscriptionId),
+				requestId,
+				providerSubscriptionId));
 	}
 
 	@Transactional
@@ -175,5 +213,14 @@ public class BillingService {
 	private UserEntity findUserForUpdate(UUID userId) {
 		return userRepository.findByIdForUpdate(userId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found."));
+	}
+
+	private String webhookEventKey(String requestId, String resourceId) {
+		try {
+			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+					.digest((requestId + ":" + resourceId).getBytes(StandardCharsets.UTF_8)));
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 is required by the runtime.", exception);
+		}
 	}
 }

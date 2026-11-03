@@ -9,8 +9,8 @@ API REST em Java 21 com Spring Boot 4.1.2 e Maven.
 - Spring Data JPA: camada de persistência.
 - PostgreSQL e Flyway: banco de dados e migrations versionadas.
 - Jakarta Validation: validação de entradas das próximas etapas.
-- Springdoc OpenAPI: documentação Swagger em `/swagger-ui.html`.
-- Actuator: endpoint operacional `/actuator/health`.
+- Springdoc OpenAPI: documentação Swagger em `/swagger-ui.html`, desativada no perfil `prod`.
+- Actuator: endpoints `/actuator/health` e `/actuator/info`; detalhes operacionais exigem autenticação.
 - JUnit e H2: testes automatizados e perfil de desenvolvimento sem exigir um servidor PostgreSQL local.
 
 ## Configuração local
@@ -32,12 +32,17 @@ $env:SPRING_PROFILES_ACTIVE = 'dev'
 mvn -f backend\pom.xml spring-boot:run
 ```
 
-Para produção, configure `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` e `JWT_SECRET`
-com valores gerenciados fora do repositório, e não ative o perfil `dev`.
+O perfil `prod` configura PostgreSQL, valida o schema migrado e desativa a documentação
+OpenAPI. Configure `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` e `JWT_SECRET` com valores
+gerenciados fora do repositório, e não ative o perfil `dev`.
 `JWT_SECRET` precisa ser uma chave Base64 com pelo menos 32 bytes aleatórios.
 
 O Flyway executa as migrations ao iniciar. O Hibernate valida o schema sem
 alterá-lo. Nunca use credenciais reais em arquivos versionados.
+
+Para executar a stack de produção localmente com PostgreSQL, consulte a seção
+Docker Compose no [README principal](../README.md). O healthcheck do backend usa
+`/actuator/health`; logs da aplicação são emitidos em JSON para stdout.
 
 ## Endpoints implementados
 

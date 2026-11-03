@@ -102,6 +102,10 @@ public class UserEntity {
 
 	public void changePassword(String passwordHash) {
 		this.passwordHash = passwordHash;
+		revokeSessions();
+	}
+
+	public void revokeSessions() {
 		this.sessionVersion++;
 	}
 

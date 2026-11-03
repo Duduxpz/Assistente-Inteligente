@@ -9,7 +9,7 @@ export interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, displayName: string) => Promise<void>
   updateProfile: (displayName: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   reloadUser: () => void
 }
 

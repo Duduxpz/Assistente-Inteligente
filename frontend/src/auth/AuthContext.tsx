@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ApiError, apiRequest, login as loginRequest, register as registerRequest, type AuthUser } from '../lib/api'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  ApiError,
+  apiRequest,
+  login as loginRequest,
+  register as registerRequest,
+  type AuthResponse,
+  type AuthUser,
+} from '../lib/api'
 import { AuthContext, type AuthContextValue } from './context'
 
 const accessTokenKey = 'aether.accessToken'
@@ -20,9 +27,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [resolvedToken, setResolvedToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
-  const loading = Boolean(token && resolvedToken !== token)
+  const [sessionRestored, setSessionRestored] = useState(false)
+  const restoreAttempted = useRef(false)
+  const loading = !sessionRestored || Boolean(token && resolvedToken !== token)
 
-  const logout = useCallback(() => {
+  const clearSession = useCallback(() => {
     localStorage.removeItem(accessTokenKey)
     sessionStorage.removeItem(accessTokenKey)
     setToken(null)
@@ -31,14 +40,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setResolvedToken(null)
   }, [])
 
+  const logout = useCallback(async () => {
+    try {
+      if (token) await apiRequest<void>('/auth/logout', { method: 'POST' }, token)
+      clearSession()
+    } catch (logoutError) {
+      setError(logoutError instanceof Error ? logoutError.message : 'Não foi possível encerrar a sessão.')
+      throw logoutError
+    }
+  }, [clearSession, token])
+
   useEffect(() => {
     function handleUnauthorized(event: Event) {
-      if (event instanceof CustomEvent && event.detail === token) logout()
+      if (event instanceof CustomEvent && event.detail === token) clearSession()
+    }
+
+    function handleTokenRefreshed(event: Event) {
+      if (!(event instanceof CustomEvent)) return
+      const auth = event.detail as AuthResponse
+      localStorage.setItem(accessTokenKey, auth.accessToken)
+      sessionStorage.removeItem(accessTokenKey)
+      setToken(auth.accessToken)
+      setResolvedToken(auth.accessToken)
+      setUser(auth.user)
+      setError(null)
+      setSessionRestored(true)
     }
 
     window.addEventListener('aether:unauthorized', handleUnauthorized)
-    return () => window.removeEventListener('aether:unauthorized', handleUnauthorized)
-  }, [logout, token])
+    window.addEventListener('aether:token-refreshed', handleTokenRefreshed)
+    return () => {
+      window.removeEventListener('aether:unauthorized', handleUnauthorized)
+      window.removeEventListener('aether:token-refreshed', handleTokenRefreshed)
+    }
+  }, [clearSession, token])
 
   const reloadUser = useCallback(() => {
     setError(null)
@@ -56,6 +91,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token])
 
   useEffect(() => {
+    if (token) {
+      restoreAttempted.current = true
+      setSessionRestored(true)
+      return
+    }
+    if (restoreAttempted.current) return
+
+    let active = true
+    restoreAttempted.current = true
+    void apiRequest<AuthResponse>('/auth/refresh', { method: 'POST' })
+      .then((auth) => {
+        if (!active) return
+        localStorage.setItem(accessTokenKey, auth.accessToken)
+        setToken(auth.accessToken)
+        setResolvedToken(auth.accessToken)
+        setUser(auth.user)
+        setError(null)
+      })
+      .catch((requestError: unknown) => {
+        if (!active) return
+        if (!(requestError instanceof ApiError && requestError.status === 401)) {
+          setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar sua conta.')
+        }
+      })
+      .finally(() => {
+        if (active) setSessionRestored(true)
+      })
+
+    return () => { active = false }
+  }, [token])
+
+  useEffect(() => {
     if (!token) return
 
     let active = true
@@ -67,18 +134,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((requestError: unknown) => {
         if (!active) return
-        if (requestError instanceof ApiError && requestError.status === 401) {
-          localStorage.removeItem(accessTokenKey)
-          sessionStorage.removeItem(accessTokenKey)
-          setToken(null)
-          setUser(null)
-        } else {
+        if (!(requestError instanceof ApiError && requestError.status === 401)) {
           setUser(null)
           setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar sua conta.')
         }
       })
       .finally(() => {
-        if (active) setResolvedToken(token)
+        if (active) {
+          setResolvedToken((current) => current && current !== token ? current : token)
+        }
       })
 
     return () => { active = false }
@@ -91,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(auth.accessToken)
     setResolvedToken(auth.accessToken)
     setUser(auth.user)
+    setSessionRestored(true)
     setError(null)
   }, [])
 

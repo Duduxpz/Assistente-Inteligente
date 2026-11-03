@@ -37,6 +37,6 @@ public class MercadoPagoWebhookController {
 		if (!signatureVerifier.isValid(signature, requestId, dataId, properties.webhookSecret())) {
 			throw new ApiException(HttpStatus.UNAUTHORIZED, "Assinatura do webhook inválida.");
 		}
-		billingService.processWebhook(dataId);
+		billingService.processWebhook(dataId, requestId);
 	}
 }

@@ -101,6 +101,15 @@ class BillingIntegrationTest {
 						.content("{}"))
 				.andExpect(status().isOk());
 
+		gateway.setSubscription(new Subscription(providerId, userId.toString(), "cancelled", null));
+		mockMvc.perform(post("/api/v1/billing/webhooks/mercadopago")
+						.param("data.id", providerId)
+						.header("x-request-id", REQUEST_ID)
+						.header("x-signature", signature(providerId))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{}"))
+				.andExpect(status().isOk());
+
 		mockMvc.perform(get("/api/v1/plans")
 						.header("Authorization", bearer(token)))
 				.andExpect(status().isOk())

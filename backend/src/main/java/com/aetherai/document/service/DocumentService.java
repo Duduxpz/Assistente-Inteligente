@@ -20,6 +20,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.OutputStream;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -133,6 +134,16 @@ public class DocumentService {
 		documentRepository.delete(document);
 	}
 
+	@Transactional(readOnly = true)
+	public void copyTo(UUID userId, UUID documentId, OutputStream outputStream) throws IOException {
+		DocumentEntity document = getOwnedDocument(userId, documentId);
+		Path file = resolveStorageKey(document.getStorageKey());
+		if (!Files.isRegularFile(file)) {
+			throw new ApiException(HttpStatus.NOT_FOUND, "Document file not found.");
+		}
+		Files.copy(file, outputStream);
+	}
+
 	private DocumentEntity getOwnedDocument(UUID userId, UUID documentId) {
 		return documentRepository.findByIdAndUserId(documentId, userId)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Document not found."));
@@ -152,10 +163,21 @@ public class DocumentService {
 		}
 		String normalized = originalFileName.replace('\\', '/');
 		String fileName = normalized.substring(normalized.lastIndexOf('/') + 1).trim();
-		if (fileName.isBlank() || fileName.length() > 255 || fileName.chars().anyMatch(Character::isISOControl)) {
+		if (fileName.chars().anyMatch(Character::isISOControl)) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "The file name is invalid.");
 		}
-		return fileName;
+		String sanitized = fileName
+				.replaceAll("[<>:\"|?*]", "_")
+				.replaceAll("[. ]+$", "")
+				.trim();
+		if (sanitized.isBlank()
+				|| sanitized.length() > 255
+				|| sanitized.equals(".")
+				|| sanitized.equals("..")
+				|| sanitized.matches("(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\..*)?$")) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "The file name is invalid.");
+		}
+		return sanitized;
 	}
 
 	private String extensionOf(String fileName) {
@@ -165,14 +187,15 @@ public class DocumentService {
 
 	private void validateContent(String extension, byte[] content) {
 		if (extension.equals(".pdf")) {
-			int headerLength = Math.min(content.length, 1024);
-			String header = new String(content, 0, headerLength, StandardCharsets.ISO_8859_1);
-			if (!header.contains("%PDF-")) {
+			if (!hasPdfHeader(content)) {
 				throw new ApiException(HttpStatus.BAD_REQUEST, "The file content does not match a PDF document.");
 			}
 			return;
 		}
 
+		if (hasPdfHeader(content)) {
+			throw new ApiException(HttpStatus.BAD_REQUEST, "PDF content must use the .pdf file extension.");
+		}
 		try {
 			String text = StandardCharsets.UTF_8.newDecoder()
 					.onMalformedInput(CodingErrorAction.REPORT)
@@ -186,6 +209,12 @@ public class DocumentService {
 		} catch (CharacterCodingException exception) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "Text files must use valid UTF-8 encoding.");
 		}
+	}
+
+	private boolean hasPdfHeader(byte[] content) {
+		int headerLength = Math.min(content.length, 1024);
+		String header = new String(content, 0, headerLength, StandardCharsets.ISO_8859_1);
+		return header.contains("%PDF-");
 	}
 
 	public record DownloadedDocument(DocumentEntity document, byte[] content) {

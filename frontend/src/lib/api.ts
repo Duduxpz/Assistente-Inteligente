@@ -19,6 +19,99 @@ function notifyUnauthorized(token: string | null | undefined) {
   }
 }
 
+let pendingRefresh: Promise<AuthResponse | null> | null = null
+
+function refreshAccessToken(): Promise<AuthResponse | null> {
+  if (pendingRefresh) return pendingRefresh
+
+  pendingRefresh = fetch(`${apiBaseUrl}/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+    .then(async (response) => {
+      if (response.status === 401) return null
+      const body = await response.text()
+      let data: unknown
+      if (body) {
+        try {
+          data = JSON.parse(body)
+        } catch {
+          throw new ApiError(`A API retornou uma resposta inválida (HTTP ${response.status}).`, response.status)
+        }
+      }
+      if (!response.ok) {
+        const message = typeof data === 'object' && data !== null && 'message' in data
+          ? String(data.message)
+          : `A requisição falhou (HTTP ${response.status}).`
+        throw new ApiError(message, response.status)
+      }
+      const auth = data as AuthResponse
+      window.dispatchEvent(new CustomEvent('aether:token-refreshed', { detail: auth }))
+      return auth
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(
+        error instanceof Error
+          ? `Não foi possível renovar a sessão. Verifique a conexão com a API. (${error.message})`
+          : 'Não foi possível renovar a sessão. Verifique a conexão com a API.',
+        0,
+      )
+    })
+    .finally(() => {
+      pendingRefresh = null
+    })
+
+  return pendingRefresh
+}
+
+async function fetchApi(
+  path: string,
+  options: RequestInit,
+  headers: Headers,
+  token?: string | null,
+): Promise<Response> {
+  const request = () => fetch(`${apiBaseUrl}${path}`, {
+    ...options,
+    headers,
+    credentials: options.credentials ?? 'include',
+  })
+
+  let response: Response
+  try {
+    response = await request()
+  } catch (error) {
+    throw new ApiError(
+      error instanceof Error
+        ? `Não foi possível conectar à API. Verifique se o backend está em execução. (${error.message})`
+        : 'Não foi possível conectar à API. Verifique se o backend está em execução.',
+      0,
+    )
+  }
+
+  if (response.status === 401
+    && token
+    && !['/auth/login', '/auth/register', '/auth/refresh'].includes(path)) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) {
+      headers.set('Authorization', `Bearer ${refreshed.accessToken}`)
+      try {
+        response = await request()
+      } catch (error) {
+        throw new ApiError(
+          error instanceof Error
+            ? `Não foi possível conectar à API. Verifique se o backend está em execução. (${error.message})`
+            : 'Não foi possível conectar à API. Verifique se o backend está em execução.',
+          0,
+        )
+      }
+    }
+  }
+
+  if (response.status === 401) notifyUnauthorized(token)
+  return response
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
@@ -30,19 +123,7 @@ export async function apiRequest<T>(
   }
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  let response: Response
-  try {
-    response = await fetch(`${apiBaseUrl}${path}`, { ...options, headers })
-  } catch (error) {
-    throw new ApiError(
-      error instanceof Error
-        ? `Não foi possível conectar à API. Verifique se o backend está em execução. (${error.message})`
-        : 'Não foi possível conectar à API. Verifique se o backend está em execução.',
-      0,
-    )
-  }
-
-  if (response.status === 401) notifyUnauthorized(token)
+  const response = await fetchApi(path, options, headers, token)
 
   const body = await response.text()
   let data: unknown
@@ -179,19 +260,7 @@ export async function apiDownload(path: string, token: string | null): Promise<B
   const headers = new Headers()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  let response: Response
-  try {
-    response = await fetch(`${apiBaseUrl}${path}`, { headers })
-  } catch (error) {
-    throw new ApiError(
-      error instanceof Error
-        ? `Não foi possível conectar à API. Verifique se o backend está em execução. (${error.message})`
-        : 'Não foi possível conectar à API. Verifique se o backend está em execução.',
-      0,
-    )
-  }
-
-  if (response.status === 401) notifyUnauthorized(token)
+  const response = await fetchApi(path, {}, headers, token)
 
   if (!response.ok) {
     const body = await response.text()
