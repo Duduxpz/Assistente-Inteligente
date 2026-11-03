@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import com.aetherai.plan.PlanTier;
+import com.aetherai.user.repository.UserRepository;
 
 import java.util.UUID;
 
@@ -35,6 +37,12 @@ class DevBillingIntegrationTest {
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private UserRepository userRepository;
+
+	@Autowired
+	private SubscriptionRepository subscriptionRepository;
 
 	private String email;
 	private String token;
@@ -95,6 +103,21 @@ class DevBillingIntegrationTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"planKey\":\"free\"}"))
 				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void canReplaceStartupUltraEntitlementWithAnotherTestPlan() throws Exception {
+		var user = userRepository.findByEmail(email).orElseThrow();
+		user.setPlanKey(PlanTier.ULTRA.key());
+		subscriptionRepository.save(new SubscriptionEntity(user.getId(), PlanTier.ULTRA.key(), null));
+
+		mockMvc.perform(post("/api/v1/billing/test/activate")
+						.header("Authorization", bearer(token))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"planKey\":\"plus\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.planKey").value("plus"))
+				.andExpect(jsonPath("$.testSubscription").value(true));
 	}
 
 	private String bearer(String accessToken) {

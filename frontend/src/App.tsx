@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowRight,
@@ -205,14 +205,7 @@ function ApplicationShell() {
           <span className="brand-name">AETHER<span>AI</span></span>
         </NavLink>
 
-        <div className="workspace-switcher" aria-label="Espaço pessoal">
-          <span className="workspace-avatar">D</span>
-          <span className="workspace-copy">
-            <span>Meu espaço</span>
-            <span>Meu plano atual</span>
-          </span>
-          <ChevronDown size={15} />
-        </div>
+        <WorkspacePlanMenu token={token} displayName={user?.displayName ?? 'AETHER'} />
 
         <button className="new-chat-button" type="button" onClick={startConversation}>
           <Plus size={17} />
@@ -352,6 +345,156 @@ function ApplicationShell() {
           </Routes>
         </div>
       </main>
+    </div>
+  )
+}
+
+function WorkspacePlanMenu({ token, displayName }: { token: string | null; displayName: string }) {
+  const [open, setOpen] = useState(false)
+  const [catalog, setCatalog] = useState<PlanCatalog | null>(null)
+  const [billing, setBilling] = useState<BillingStatus | null>(null)
+  const [catalogError, setCatalogError] = useState('')
+  const [billingError, setBillingError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentPlan = catalog?.plans.find((plan) => plan.key === catalog.currentPlanKey)
+  const planLabel = currentPlan?.name ?? (catalog ? 'Plano indisponível' : 'Carregando plano...')
+  const userInitial = displayName.trim().charAt(0).toUpperCase() || 'A'
+
+  useEffect(() => {
+    let active = true
+    void apiRequest<PlanCatalog>('/plans', {}, token)
+      .then((response) => {
+        if (active) {
+          setCatalog(response)
+          setCatalogError('')
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setCatalog(null)
+          setCatalogError(requestError instanceof Error
+            ? requestError.message
+            : 'Não foi possível consultar seu plano.')
+        }
+      })
+    void apiRequest<BillingStatus>('/billing', {}, token)
+      .then((response) => {
+        if (active) {
+          setBilling(response)
+          setBillingError('')
+        }
+      })
+      .catch((requestError: unknown) => {
+        if (active) {
+          setBilling(null)
+          setBillingError(requestError instanceof Error
+            ? requestError.message
+            : 'Não foi possível consultar sua assinatura.')
+        }
+      })
+    return () => { active = false }
+  }, [token, location.pathname, refreshKey])
+
+  useEffect(() => {
+    if (!open) return
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) {
+        setOpen(false)
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  function openPlanManagement() {
+    setOpen(false)
+    navigate('/plans')
+  }
+
+  return (
+    <div className="workspace-menu" ref={menuRef}>
+      <button
+        className="workspace-switcher"
+        type="button"
+        aria-label={`Meu espaço, plano ${planLabel}`}
+        aria-expanded={open}
+        aria-controls="workspace-plan-popover"
+        onClick={() => {
+          setOpen((value) => !value)
+          setRefreshKey((value) => value + 1)
+        }}
+      >
+        <span className="workspace-avatar">{userInitial}</span>
+        <span className="workspace-copy">
+          <span>Meu espaço</span>
+          <span>{planLabel}</span>
+        </span>
+        <ChevronDown className={open ? 'workspace-chevron-open' : ''} size={15} />
+      </button>
+      {open && (
+        <section className="workspace-plan-popover" id="workspace-plan-popover" aria-label="Detalhes do plano atual">
+          <div className="workspace-plan-heading">
+            <div>
+              <span className="workspace-plan-eyebrow">SEU PLANO ATUAL</span>
+              <h2>{currentPlan?.name ?? (catalogError ? 'Plano indisponível' : 'Carregando...')}</h2>
+            </div>
+            {currentPlan && <span className="workspace-plan-badge">ATIVO</span>}
+          </div>
+          {currentPlan && (
+            <>
+              <p className="workspace-plan-description">{currentPlan.description}</p>
+              <p className="workspace-plan-price">
+                <strong>
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+                    .format(currentPlan.monthlyPriceCents / 100)}
+                </strong>
+                <span>/mês</span>
+              </p>
+              <ul className="workspace-plan-features">
+                <li><span>Mensagens de IA</span><strong>{currentPlan.monthlyMessages}/mês</strong></li>
+                <li>
+                  <span>Tarefas ativas</span>
+                  <strong>{currentPlan.activeTaskLimit ?? 'Ilimitadas'}</strong>
+                </li>
+                <li>
+                  <span>Conversas</span>
+                  <strong>{currentPlan.conversationLimit ?? 'Ilimitadas'}</strong>
+                </li>
+                <li><span>Documentos</span><strong>{formatBytes(currentPlan.documentStorageBytes)}</strong></li>
+              </ul>
+            </>
+          )}
+          {billing?.testModeEnabled && (
+            <p className="workspace-plan-status">
+              {billing.testSubscription
+                ? 'Plano de teste ativo; nenhuma cobrança foi realizada.'
+                : 'Modo de testes: as assinaturas não geram cobrança.'}
+            </p>
+          )}
+          {billing?.cancellationScheduled && billing.currentPeriodEnd && (
+            <p className="workspace-plan-status">
+              Acesso disponível até {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' })
+                .format(new Date(billing.currentPeriodEnd))}.
+            </p>
+          )}
+          {(catalogError || billingError) && (
+            <p className="workspace-plan-error" role="status">{catalogError || billingError}</p>
+          )}
+          <button className="workspace-plan-manage" onClick={openPlanManagement} type="button">
+            Gerenciar plano <ArrowRight size={14} />
+          </button>
+        </section>
+      )}
     </div>
   )
 }

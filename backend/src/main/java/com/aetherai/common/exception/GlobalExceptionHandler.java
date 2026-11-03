@@ -1,9 +1,12 @@
 package com.aetherai.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -15,6 +18,8 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+	private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
 	@ExceptionHandler(ApiException.class)
 	ResponseEntity<ApiError> handleApiException(ApiException exception, HttpServletRequest request) {
@@ -34,6 +39,14 @@ public class GlobalExceptionHandler {
 	ResponseEntity<ApiError> handleIntegrityViolation(
 			DataIntegrityViolationException exception,
 			HttpServletRequest request) {
+		Throwable cause = exception.getMostSpecificCause();
+		String constraint = cause instanceof ConstraintViolationException violation
+				? violation.getConstraintName()
+				: null;
+		logger.warn("Data integrity conflict for {} (cause={}, constraint={})",
+				request.getRequestURI(),
+				cause.getClass().getSimpleName(),
+				constraint == null ? "unknown" : constraint);
 		return response(HttpStatus.CONFLICT, "The request conflicts with existing data.", request);
 	}
 

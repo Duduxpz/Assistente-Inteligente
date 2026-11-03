@@ -58,8 +58,13 @@
   font-weight: 500;
 }
 
+.workspace-menu {
+  position: relative;
+}
+
 .workspace-switcher {
   display: flex;
+  width: 100%;
   min-height: 56px;
   align-items: center;
   gap: 10px;
@@ -67,9 +72,20 @@
   border: 1px solid var(--line);
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.018);
+  color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
   transition: background 160ms ease, border-color 160ms ease;
+}
+
+.workspace-switcher > svg {
+  flex: 0 0 auto;
+  transition: transform 160ms ease;
+}
+
+.workspace-switcher > .workspace-chevron-open {
+  transform: rotate(180deg);
 }
 
 .workspace-switcher:hover {
@@ -119,6 +135,152 @@
 .workspace-switcher > svg,
 .profile-card > svg {
   color: #707990;
+}
+
+.workspace-plan-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background:
+    radial-gradient(ellipse at 90% 0%, rgba(108, 83, 192, 0.13), transparent 40%),
+    #10121c;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+  animation: workspace-popover-in 140ms ease-out;
+}
+
+.workspace-plan-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-plan-eyebrow {
+  color: #9691ad;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+}
+
+.workspace-plan-heading h2 {
+  margin: 5px 0 0;
+  color: #f0effa;
+  font-size: 17px;
+  font-weight: 620;
+}
+
+.workspace-plan-badge {
+  padding: 4px 6px;
+  border: 1px solid rgba(121, 218, 183, 0.22);
+  border-radius: 20px;
+  background: rgba(57, 160, 119, 0.1);
+  color: #8eddbd;
+  font-size: 7px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+}
+
+.workspace-plan-description {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.workspace-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 11px 0;
+}
+
+.workspace-plan-price strong {
+  color: #e9e4ff;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.workspace-plan-price span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.workspace-plan-features {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  list-style: none;
+}
+
+.workspace-plan-features li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.workspace-plan-features strong {
+  color: #d7d4e4;
+  font-size: 9px;
+  font-weight: 550;
+  text-align: right;
+}
+
+.workspace-plan-status {
+  margin: 9px 0 0;
+  color: #b7aaff;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.workspace-plan-error {
+  margin: 9px 0 0;
+  color: #e3a9a9;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.workspace-plan-manage {
+  display: flex;
+  width: 100%;
+  min-height: 33px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 11px;
+  padding: 0 9px;
+  border: 1px solid rgba(164, 143, 255, 0.26);
+  border-radius: 7px;
+  background: rgba(112, 84, 198, 0.12);
+  color: #d9d1ff;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.workspace-plan-manage:hover {
+  border-color: rgba(180, 161, 255, 0.5);
+  background: rgba(112, 84, 198, 0.2);
+}
+
+@keyframes workspace-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .new-chat-button {
@@ -1815,6 +1977,29 @@
   border-color: var(--line-strong);
   background: #ffffff;
   color: #252b3a;
+}
+
+:root[data-theme="light"] .workspace-plan-popover {
+  border-color: var(--line-strong);
+  background:
+    radial-gradient(ellipse at 90% 0%, rgba(108, 83, 192, 0.08), transparent 40%),
+    #ffffff;
+  box-shadow: 0 16px 38px rgba(27, 35, 54, 0.16);
+}
+
+:root[data-theme="light"] .workspace-plan-heading h2,
+:root[data-theme="light"] .workspace-plan-price strong,
+:root[data-theme="light"] .workspace-plan-features strong {
+  color: #252b3a;
+}
+
+:root[data-theme="light"] .workspace-plan-features {
+  border-color: var(--line);
+}
+
+:root[data-theme="light"] .workspace-plan-manage {
+  color: #51418f;
+  background: rgba(112, 84, 198, 0.08);
 }
 
 :root[data-theme="light"] .brand,
