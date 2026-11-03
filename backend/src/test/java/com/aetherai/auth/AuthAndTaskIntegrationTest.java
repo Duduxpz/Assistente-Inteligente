@@ -147,6 +147,37 @@ class AuthAndTaskIntegrationTest {
 	}
 
 	@Test
+	void protectedUserAndAdminRoutesRejectAnonymousRequests() throws Exception {
+		mockMvc.perform(get("/api/v1/tasks"))
+				.andExpect(status().isUnauthorized());
+
+		mockMvc.perform(get("/api/v1/admin/users"))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void malformedApiRequestsUseTheStandardErrorShape() throws Exception {
+		mockMvc.perform(post("/api/v1/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.path").value("/api/v1/auth/login"))
+				.andExpect(jsonPath("$.message").isNotEmpty());
+	}
+
+	@Test
+	void actuatorInfoRequiresAuthenticationAndReturnsApplicationMetadata() throws Exception {
+		mockMvc.perform(get("/actuator/info"))
+				.andExpect(status().isUnauthorized());
+
+		mockMvc.perform(get("/actuator/info")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.app.name").value("AETHER AI"));
+	}
+
+	@Test
 	void registrationValidatesPasswordAndRejectsDuplicateEmail() throws Exception {
 		mockMvc.perform(post("/api/v1/auth/register")
 						.contentType(MediaType.APPLICATION_JSON)

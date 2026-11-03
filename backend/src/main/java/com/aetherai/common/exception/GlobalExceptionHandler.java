@@ -2,7 +2,10 @@ package com.aetherai.common.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.slf4j.Logger;
@@ -11,6 +14,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -48,6 +52,21 @@ public class GlobalExceptionHandler {
 				cause.getClass().getSimpleName(),
 				constraint == null ? "unknown" : constraint);
 		return response(HttpStatus.CONFLICT, "The request conflicts with existing data.", request);
+	}
+
+	@ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+	ResponseEntity<ApiError> handleMalformedRequest(Exception exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, "The request contains invalid or malformed data.", request);
+	}
+
+	@ExceptionHandler(AccessDeniedException.class)
+	ResponseEntity<ApiError> handleAccessDenied(HttpServletRequest request) {
+		return response(HttpStatus.FORBIDDEN, "You do not have permission to access this resource.", request);
+	}
+
+	@ExceptionHandler(NoResourceFoundException.class)
+	ResponseEntity<ApiError> handleNotFound(HttpServletRequest request) {
+		return response(HttpStatus.NOT_FOUND, "The requested resource was not found.", request);
 	}
 
 	private ResponseEntity<ApiError> response(
