@@ -3,6 +3,7 @@ package com.aetherai.auth;
 import com.jayway.jsonpath.JsonPath;
 import com.aetherai.common.exception.ApiException;
 import com.aetherai.plan.service.PlanLimitService;
+import com.aetherai.document.repository.DocumentRepository;
 import com.aetherai.usage.entity.UsageLogEntity;
 import com.aetherai.usage.repository.UsageRepository;
 import com.aetherai.user.entity.UserEntity;
@@ -19,6 +20,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.UUID;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -54,6 +59,9 @@ class AuthAndTaskIntegrationTest {
 
 	@Autowired
 	private UsageRepository usageRepository;
+
+	@Autowired
+	private DocumentRepository documentRepository;
 
 	private String firstUserToken;
 	private String firstUserId;
@@ -136,6 +144,9 @@ class AuthAndTaskIntegrationTest {
 		mockMvc.perform(get("/api/v1/admin/users")
 						.header("Authorization", bearer(firstUserToken)))
 				.andExpect(status().isForbidden());
+		mockMvc.perform(get("/api/v1/admin/metrics")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isForbidden());
 
 		UserEntity user = userRepository.findById(UUID.fromString(firstUserId)).orElseThrow();
 		user.setEnabled(false);
@@ -215,6 +226,61 @@ class AuthAndTaskIntegrationTest {
 				.andExpect(status().isUnauthorized());
 		assertNotEquals("", rotatedAccessToken);
 		assertNotEquals("", accessToken);
+	}
+
+	@Test
+	void accountExportIncludesDocumentsAndDeletionRemovesTheAccount() throws Exception {
+		MockMultipartFile document = new MockMultipartFile(
+				"file",
+				"..\\..\\private?.txt",
+				"text/plain",
+				"my private document".getBytes(StandardCharsets.UTF_8));
+		MvcResult upload = mockMvc.perform(multipart("/api/v1/documents")
+						.file(document)
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.fileName").value("private_.txt"))
+				.andReturn();
+		String documentId = JsonPath.read(upload.getResponse().getContentAsString(), "$.id");
+
+		MvcResult pendingExport = mockMvc.perform(get("/api/v1/users/me/export")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted())
+				.andReturn();
+		MvcResult completedExport = mockMvc.perform(
+						org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(pendingExport))
+				.andExpect(status().isOk())
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+						.content().contentType("application/zip"))
+				.andReturn();
+
+		boolean foundMetadata = false;
+		boolean foundDocument = false;
+		try (ZipInputStream archive = new ZipInputStream(
+				new ByteArrayInputStream(completedExport.getResponse().getContentAsByteArray()))) {
+			ZipEntry entry;
+			while ((entry = archive.getNextEntry()) != null) {
+				if ("account.json".equals(entry.getName())) {
+					String json = new String(archive.readAllBytes(), StandardCharsets.UTF_8);
+					foundMetadata = json.contains(firstUserEmail) && json.contains("private_.txt");
+				} else if (entry.getName().startsWith("documents/" + documentId + "-")) {
+					foundDocument = "my private document".equals(
+							new String(archive.readAllBytes(), StandardCharsets.UTF_8));
+				}
+			}
+		}
+		org.junit.jupiter.api.Assertions.assertTrue(foundMetadata);
+		org.junit.jupiter.api.Assertions.assertTrue(foundDocument);
+
+		mockMvc.perform(delete("/api/v1/users/me")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isNoContent());
+		mockMvc.perform(get("/api/v1/users/me")
+						.header("Authorization", bearer(firstUserToken)))
+				.andExpect(status().isUnauthorized());
+		org.junit.jupiter.api.Assertions.assertTrue(documentRepository
+				.findByIdAndUserId(UUID.fromString(documentId), UUID.fromString(firstUserId))
+				.isEmpty());
 	}
 
 	@Test
@@ -310,6 +376,65 @@ class AuthAndTaskIntegrationTest {
 						.header("Authorization", bearer(firstUserToken)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.length()").value(0));
+	}
+
+	@Test
+	void streamingChatEndpointReportsMissingProviderAsAnSseError() throws Exception {
+		MvcResult created = mockMvc.perform(post("/api/v1/conversations")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"title":"Streaming"}
+								"""))
+				.andExpect(status().isCreated())
+				.andReturn();
+		String conversationId = JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+		MvcResult pending = mockMvc.perform(post("/api/v1/conversations/" + conversationId + "/messages/stream")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.accept(MediaType.TEXT_EVENT_STREAM)
+						.content("""
+								{"content":"Olá"}
+								"""))
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted())
+				.andReturn();
+		MvcResult result = mockMvc.perform(
+						org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(pending))
+				.andExpect(status().isOk())
+				.andReturn();
+
+		org.junit.jupiter.api.Assertions.assertTrue(result.getResponse().getContentAsString()
+				.contains("event:error"));
+		org.junit.jupiter.api.Assertions.assertTrue(result.getResponse().getContentAsString()
+				.contains("The AI provider is not configured."));
+	}
+
+	@Test
+	void regenerateEndpointRejectsConversationWithoutAnAssistantResponse() throws Exception {
+		MvcResult created = mockMvc.perform(post("/api/v1/conversations")
+						.header("Authorization", bearer(firstUserToken))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"title":"Regenerar"}
+								"""))
+				.andExpect(status().isCreated())
+				.andReturn();
+		String conversationId = JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+		MvcResult pending = mockMvc.perform(post("/api/v1/conversations/" + conversationId
+								+ "/messages/" + UUID.randomUUID() + "/regenerate/stream")
+						.header("Authorization", bearer(firstUserToken))
+						.accept(MediaType.TEXT_EVENT_STREAM))
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted())
+				.andReturn();
+		MvcResult result = mockMvc.perform(
+						org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch(pending))
+				.andExpect(status().isOk())
+				.andReturn();
+
+		org.junit.jupiter.api.Assertions.assertTrue(result.getResponse().getContentAsString()
+				.contains("There is no assistant response to regenerate."));
 	}
 
 	@Test

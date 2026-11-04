@@ -81,6 +81,7 @@ async function fetchApi(
   try {
     response = await request()
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiError(
       error instanceof Error
         ? `Não foi possível conectar à API. Verifique se o backend está em execução. (${error.message})`
@@ -98,6 +99,7 @@ async function fetchApi(
       try {
         response = await request()
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error
         throw new ApiError(
           error instanceof Error
             ? `Não foi possível conectar à API. Verifique se o backend está em execução. (${error.message})`
@@ -145,6 +147,106 @@ export async function apiRequest<T>(
   }
 
   return data as T
+}
+
+export async function streamChatMessage(
+  path: string,
+  content: string,
+  token: string | null,
+  signal: AbortSignal,
+  onToken: (token: string) => void,
+): Promise<{ messages: ChatMessage[] }> {
+  const headers = new Headers({
+    Accept: 'text/event-stream',
+    'Content-Type': 'application/json',
+  })
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const response = await fetchApi(path, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+    signal,
+  }, headers, token)
+
+  if (!response.ok) {
+    const body = await response.text()
+    let message = `A requisição falhou (HTTP ${response.status}).`
+    if (body) {
+      try {
+        const data: unknown = JSON.parse(body)
+        if (typeof data === 'object' && data !== null && 'message' in data) {
+          message = String(data.message)
+        }
+      } catch {
+        throw new ApiError(`A API retornou uma resposta inválida (HTTP ${response.status}).`, response.status)
+      }
+    }
+    throw new ApiError(message, response.status)
+  }
+
+  if (!response.body) throw new ApiError('A API não iniciou o fluxo de resposta.', response.status)
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let eventName = 'message'
+  let dataLines: string[] = []
+  let completion: { messages: ChatMessage[] } | null = null
+
+  const dispatch = () => {
+    const data = dataLines.join('\n')
+    if (dataLines.length === 0) return
+    if (eventName === 'token') {
+      onToken(data)
+    } else if (eventName === 'complete') {
+      try {
+        const parsed: unknown = JSON.parse(data)
+        if (typeof parsed !== 'object' || parsed === null || !('messages' in parsed)
+          || !Array.isArray(parsed.messages)) {
+          throw new Error('Invalid completion payload')
+        }
+        completion = parsed as { messages: ChatMessage[] }
+      } catch {
+        throw new ApiError('A API retornou uma resposta de streaming inválida.', response.status)
+      }
+    } else if (eventName === 'error') {
+      let message = 'Não foi possível gerar uma resposta.'
+      try {
+        const parsed: unknown = JSON.parse(data)
+        if (typeof parsed === 'object' && parsed !== null && 'message' in parsed) {
+          message = String(parsed.message)
+        }
+      } catch {
+        message = data || message
+      }
+      throw new ApiError(message, response.status)
+    }
+    eventName = 'message'
+    dataLines = []
+  }
+
+  while (completion === null) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, '')
+      if (line === '') {
+        dispatch()
+        if (completion !== null) break
+      } else if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim()
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).replace(/^ /, ''))
+      }
+    }
+  }
+
+  if (completion === null) {
+    throw new ApiError('O fluxo de resposta terminou antes da conclusão.', response.status)
+  }
+  return completion
 }
 
 export interface AuthUser {
@@ -254,6 +356,18 @@ export interface AdminUserPage {
   number: number
   totalPages: number
   totalElements: number
+}
+
+export interface AdminMetrics {
+  from: string
+  to: string
+  messages: number
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    requests: number
+  }
+  usersByPlan: Record<string, number>
 }
 
 export async function apiDownload(path: string, token: string | null): Promise<Blob> {

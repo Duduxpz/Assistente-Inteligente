@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-aether_ai}
       POSTGRES_USER: ${POSTGRES_USER:-aether_ai}
@@ -32,7 +32,17 @@ services:
       AI_PROVIDER: ${AI_PROVIDER:-none}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      AI_MODEL_FREE: ${AI_MODEL_FREE:-${OPENROUTER_MODEL:-openai/gpt-4o-mini}}
+      AI_MODEL_PLUS: ${AI_MODEL_PLUS:-${OPENROUTER_MODEL:-openai/gpt-4o-mini}}
+      AI_MODEL_ULTRA: ${AI_MODEL_ULTRA:-${OPENROUTER_MODEL:-openai/gpt-4o-mini}}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-http://localhost:5173}
+      RAG_ENABLED: ${RAG_ENABLED:-false}
+      RAG_EMBEDDING_BASE_URL: ${RAG_EMBEDDING_BASE_URL:-}
+      RAG_EMBEDDING_API_KEY: ${RAG_EMBEDDING_API_KEY:-}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-}
+      RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-1536}
+      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE:-1200}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP:-200}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-none}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM: ${RESEND_FROM:-}

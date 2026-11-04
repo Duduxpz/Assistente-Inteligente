@@ -34,4 +34,19 @@ public interface UsageRepository extends JpaRepository<UsageLogEntity, Long> {
 			from UsageLogEntity u
 			""")
 	UsageTotals totalsForAllUsers();
+
+	@Query("""
+			select new com.aetherai.usage.dto.UsageTotals(
+				coalesce(sum(u.inputTokens), 0),
+				coalesce(sum(u.outputTokens), 0),
+				count(u))
+			from UsageLogEntity u
+			where u.createdAt >= :from and u.createdAt < :to
+			""")
+	UsageTotals totalsBetween(@Param("from") Instant from, @Param("to") Instant to);
+
+	long countByOperationAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+			String operation,
+			Instant from,
+			Instant to);
 }

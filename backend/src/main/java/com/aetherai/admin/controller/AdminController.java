@@ -1,6 +1,7 @@
 package com.aetherai.admin.controller;
 
 import com.aetherai.admin.dto.AdminUserResponse;
+import com.aetherai.admin.dto.AdminMetricsResponse;
 import com.aetherai.admin.dto.UserStatusRequest;
 import com.aetherai.admin.service.AdminService;
 import com.aetherai.usage.dto.UsageTotals;
@@ -20,7 +21,10 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 @RestController
@@ -47,6 +51,15 @@ public class AdminController {
 	@GetMapping("/usage")
 	public UsageTotals getUsage() {
 		return usageService.forAllUsers();
+	}
+
+	@GetMapping("/metrics")
+	public AdminMetricsResponse getMetrics(
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+		Instant end = to == null ? Instant.now() : to;
+		Instant start = from == null ? end.minus(Duration.ofDays(30)) : from;
+		return adminService.metrics(start, end);
 	}
 
 	@PutMapping("/users/{userId}/status")

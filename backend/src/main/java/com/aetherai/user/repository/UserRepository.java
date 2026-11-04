@@ -24,4 +24,6 @@ public interface UserRepository extends JpaRepository<UserEntity, UUID> {
 	Optional<UserEntity> findByIdForUpdate(@Param("id") UUID id);
 
 	boolean existsByEmail(String email);
+
+	long countByPlanKey(String planKey);
 }

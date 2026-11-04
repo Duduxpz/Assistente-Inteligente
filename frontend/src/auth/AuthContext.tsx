@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ApiError,
   apiRequest,
@@ -27,8 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [resolvedToken, setResolvedToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
-  const [sessionRestored, setSessionRestored] = useState(false)
-  const restoreAttempted = useRef(false)
+  const [sessionRestored, setSessionRestored] = useState(() => Boolean(token))
   const loading = !sessionRestored || Boolean(token && resolvedToken !== token)
 
   const clearSession = useCallback(() => {
@@ -91,15 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token])
 
   useEffect(() => {
-    if (token) {
-      restoreAttempted.current = true
-      setSessionRestored(true)
-      return
-    }
-    if (restoreAttempted.current) return
+    if (token || sessionRestored) return
 
     let active = true
-    restoreAttempted.current = true
     void apiRequest<AuthResponse>('/auth/refresh', { method: 'POST' })
       .then((auth) => {
         if (!active) return
@@ -120,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
     return () => { active = false }
-  }, [token])
+  }, [token, sessionRestored])
 
   useEffect(() => {
     if (!token) return

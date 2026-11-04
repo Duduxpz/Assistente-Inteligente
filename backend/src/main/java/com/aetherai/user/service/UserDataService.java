@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.io.FilterOutputStream;
 import java.io.OutputStream;
 import java.time.Instant;
 import java.util.List;
@@ -102,7 +103,7 @@ public class UserDataService {
 
 		try (ZipOutputStream zip = new ZipOutputStream(outputStream)) {
 			zip.putNextEntry(new ZipEntry("account.json"));
-			objectMapper.writeValue(zip, export);
+			objectMapper.writeValue(new NonClosingOutputStream(zip), export);
 			zip.closeEntry();
 
 			for (DocumentEntity document : documents) {
@@ -150,6 +151,18 @@ public class UserDataService {
 	}
 
 	private String safeArchiveName(String originalName) {
-		return originalName.replace('\\', '_').replace('/', '_');
+		return originalName.replace('\\', '_').replace('/', '_').replaceAll("[\\p{Cntrl}]", "_");
+	}
+
+	private static class NonClosingOutputStream extends FilterOutputStream {
+
+		private NonClosingOutputStream(OutputStream outputStream) {
+			super(outputStream);
+		}
+
+		@Override
+		public void close() throws IOException {
+			flush();
+		}
 	}
 }

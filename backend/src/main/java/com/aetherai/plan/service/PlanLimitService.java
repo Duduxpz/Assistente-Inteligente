@@ -84,6 +84,18 @@ public class PlanLimitService {
 		}
 	}
 
+	public int ragChunkLimit(UUID userId) {
+		return switch (planFor(userId)) {
+			case FREE -> 3;
+			case PLUS -> 5;
+			case ULTRA -> 10;
+		};
+	}
+
+	public String planKey(UUID userId) {
+		return planFor(userId).key();
+	}
+
 	private PlanTier planFor(UUID userId) {
 		billingService.refreshPlanAccess(userId);
 		String planKey = userRepository.findById(userId)

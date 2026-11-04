@@ -36,6 +36,29 @@ class ApiRateLimitFilterTest {
 		assertTrue(limitedResponse.getContentAsString().contains("\"path\":\"/api/v1/auth/login\""));
 	}
 
+	@Test
+	void appliesChatLimitToStreamingEndpoint() throws Exception {
+		ApiRateLimitFilter filter = new ApiRateLimitFilter(
+				new ObjectMapper(),
+				true,
+				Duration.ofMinutes(1),
+				10,
+				5,
+				5,
+				1);
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		request.setMethod("POST");
+		request.setRequestURI("/api/v1/conversations/123/messages/stream");
+		request.setRemoteAddr("192.0.2.11");
+
+		filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
+		MockHttpServletResponse limitedResponse = new MockHttpServletResponse();
+		filter.doFilter(request, limitedResponse, new MockFilterChain());
+
+		assertEquals(429, limitedResponse.getStatus());
+		assertTrue(limitedResponse.getContentAsString().contains("\"status\":429"));
+	}
+
 	private MockHttpServletRequest request() {
 		MockHttpServletRequest request = new MockHttpServletRequest();
 		request.setMethod("POST");

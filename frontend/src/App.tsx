@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import {
   ArrowDown,
   ArrowRight,
@@ -10,6 +18,7 @@ import {
   ChevronDown,
   Circle,
   CreditCard,
+  Copy,
   Database,
   Download,
   FileText,
@@ -22,8 +31,10 @@ import {
   MessageSquareText,
   Plus,
   Pencil,
+  RefreshCw,
   Save,
   Send,
+  Square,
   Shield,
   Settings2,
   ShieldAlert,
@@ -34,8 +45,6 @@ import {
   X,
 } from 'lucide-react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { AuthPage } from './auth/AuthPage'
 import { PasswordRecoveryPage } from './auth/PasswordRecoveryPage'
 import { useAuth } from './auth/useAuth'
@@ -43,7 +52,9 @@ import {
   apiDownload,
   apiRequest,
   ApiError,
+  streamChatMessage,
   type AdminUser,
+  type AdminMetrics,
   type AdminUserPage,
   type BillingStatus,
   type ChatMessage,
@@ -55,6 +66,9 @@ import {
   type UserSettings,
 } from './lib/api'
 import './App.css'
+
+const MarkdownContent = lazy(() => import('./chat/MarkdownContent')
+  .then((module) => ({ default: module.MarkdownContent })))
 
 const navigation = [
   { label: 'Visão geral', path: '/', icon: LayoutDashboard, end: true },
@@ -676,6 +690,10 @@ function ChatPage({
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [streamingContent, setStreamingContent] = useState('')
+  const [regeneratingMessageId, setRegeneratingMessageId] = useState<string | null>(null)
+  const messageGeneration = useRef(0)
+  const streamController = useRef<AbortController | null>(null)
 
   useEffect(() => {
     let active = true
@@ -699,9 +717,10 @@ function ChatPage({
     if (!selectedConversation) return
 
     let active = true
+    const generation = messageGeneration.current
     void apiRequest<ChatMessage[]>(`/conversations/${selectedConversation.id}/messages`, {}, token)
       .then((items) => {
-        if (active) {
+        if (active && generation === messageGeneration.current) {
           setMessages(items)
           setMessagesConversationId(selectedConversation.id)
         }
@@ -709,7 +728,10 @@ function ChatPage({
       .catch((error: unknown) => {
         if (active) setNotice(error instanceof Error ? error.message : 'Não foi possível carregar as mensagens.')
       })
-    return () => { active = false }
+    return () => {
+      active = false
+      streamController.current?.abort()
+    }
   }, [selectedConversation, token])
 
   async function createConversation(): Promise<Conversation | null> {
@@ -759,23 +781,112 @@ function ChatPage({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!draft.trim() || sending) return
+    const submittedContent = draft.trim()
+    const controller = new AbortController()
+    streamController.current = controller
+    messageGeneration.current++
     setSending(true)
+    setStreamingContent('')
+    setRegeneratingMessageId(null)
     setNotice('')
     try {
       const conversation = selectedConversation ?? await createConversation()
       if (!conversation) return
-      const result = await apiRequest<{ messages: ChatMessage[] }>(
-        `/conversations/${conversation.id}/messages`,
-        { method: 'POST', body: JSON.stringify({ content: draft.trim() }) },
+      const result = await streamChatMessage(
+        `/conversations/${conversation.id}/messages/stream`,
+        submittedContent,
         token,
+        controller.signal,
+        (tokenChunk) => setStreamingContent((current) => current + tokenChunk),
       )
+      messageGeneration.current++
       setMessages(result.messages)
       setMessagesConversationId(conversation.id)
       setDraft('')
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Não foi possível enviar a mensagem.')
+      messageGeneration.current++
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setNotice('Geração interrompida.')
+      } else {
+        setNotice(error instanceof Error ? error.message : 'Não foi possível enviar a mensagem.')
+      }
+      if (selectedConversation) {
+        const generation = messageGeneration.current
+        void apiRequest<ChatMessage[]>(
+          `/conversations/${selectedConversation.id}/messages`,
+          {},
+          token,
+        )
+          .then((items) => {
+            if (generation === messageGeneration.current) {
+              setMessages(items)
+              setMessagesConversationId(selectedConversation.id)
+            }
+          })
+          .catch((loadError: unknown) => {
+            setNotice(loadError instanceof Error
+              ? loadError.message
+              : 'Não foi possível carregar as mensagens.')
+          })
+      }
     } finally {
+      if (streamController.current === controller) streamController.current = null
       setSending(false)
+      setStreamingContent('')
+      setRegeneratingMessageId(null)
+    }
+  }
+
+  async function regenerateResponse(message: ChatMessage) {
+    if (!selectedConversation || sending) return
+    const conversation = selectedConversation
+    const controller = new AbortController()
+    streamController.current = controller
+    messageGeneration.current++
+    setSending(true)
+    setStreamingContent('')
+    setRegeneratingMessageId(message.id)
+    setNotice('')
+    try {
+      const result = await streamChatMessage(
+        `/conversations/${conversation.id}/messages/${message.id}/regenerate/stream`,
+        '',
+        token,
+        controller.signal,
+        (tokenChunk) => setStreamingContent((current) => current + tokenChunk),
+      )
+      messageGeneration.current++
+      setMessages(result.messages)
+      setMessagesConversationId(conversation.id)
+    } catch (error) {
+      messageGeneration.current++
+      setNotice(error instanceof DOMException && error.name === 'AbortError'
+        ? 'Geração interrompida.'
+        : error instanceof Error ? error.message : 'Não foi possível regenerar a resposta.')
+      void apiRequest<ChatMessage[]>(`/conversations/${conversation.id}/messages`, {}, token)
+        .then((items) => {
+          setMessages(items)
+          setMessagesConversationId(conversation.id)
+        })
+        .catch((loadError: unknown) => {
+          setNotice(loadError instanceof Error
+            ? loadError.message
+            : 'Não foi possível carregar as mensagens.')
+        })
+    } finally {
+      if (streamController.current === controller) streamController.current = null
+      setSending(false)
+      setStreamingContent('')
+      setRegeneratingMessageId(null)
+    }
+  }
+
+  async function copyResponse(content: string) {
+    try {
+      await navigator.clipboard.writeText(content)
+      setNotice('Resposta copiada.')
+    } catch {
+      setNotice('Não foi possível copiar a resposta para a área de transferência.')
     }
   }
 
@@ -860,12 +971,51 @@ function ChatPage({
                 {message.role === 'assistant'
                   ? (
                     <div className="markdown-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                      <Suspense fallback={<p>Formatando resposta...</p>}>
+                        <MarkdownContent
+                          content={sending && regeneratingMessageId === message.id
+                            ? streamingContent || 'Preparando resposta...'
+                            : message.content}
+                        />
+                      </Suspense>
                     </div>
                   )
                   : <p>{message.content}</p>}
+                {message.role === 'assistant' && (
+                  <div className="message-actions">
+                    <button
+                      type="button"
+                      aria-label="Copiar resposta"
+                      onClick={() => void copyResponse(message.content)}
+                    >
+                      <Copy size={13} /> Copiar
+                    </button>
+                    {message.id === messages[messages.length - 1]?.id && (
+                      <button
+                        type="button"
+                        aria-label="Regenerar resposta"
+                        disabled={sending}
+                        onClick={() => void regenerateResponse(message)}
+                      >
+                        <RefreshCw size={13} /> Regenerar
+                      </button>
+                    )}
+                  </div>
+                )}
               </article>
             ))}
+            {sending && selectedConversation && (
+              <article className="message-bubble message-assistant" aria-live="polite">
+                <span>AETHER AI</span>
+                <div className="markdown-content">
+                  {!regeneratingMessageId && (
+                    streamingContent
+                      ? <Suspense fallback={<p>Formatando resposta...</p>}><MarkdownContent content={streamingContent} /></Suspense>
+                      : <p>Preparando resposta...</p>
+                  )}
+                </div>
+              </article>
+            )}
           </div>
           <form className="composer" onSubmit={(event) => void handleSubmit(event)}>
             <label className="sr-only" htmlFor="message-draft">Escreva sua mensagem</label>
@@ -888,11 +1038,12 @@ function ChatPage({
               </span>
               <button
                 className="send-button"
-                type="submit"
-                disabled={!draft.trim() || sending}
-                aria-label="Enviar mensagem"
+                type={sending ? 'button' : 'submit'}
+                disabled={!sending && !draft.trim()}
+                onClick={sending ? () => streamController.current?.abort() : undefined}
+                aria-label={sending ? 'Parar geração' : 'Enviar mensagem'}
               >
-                {sending ? <LoaderCircle size={16} className="spin-icon" /> : <Send size={16} />}
+                {sending ? <Square size={14} /> : <Send size={16} />}
               </button>
             </div>
           </form>
@@ -1667,7 +1818,7 @@ function PlansPage() {
 function AdminPage({ aiConfigured }: { aiConfigured: boolean | null }) {
   const { token } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
-  const [usage, setUsage] = useState<{ inputTokens: number; outputTokens: number; requests: number } | null>(null)
+  const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -1675,12 +1826,12 @@ function AdminPage({ aiConfigured }: { aiConfigured: boolean | null }) {
     let active = true
     void Promise.all([
       apiRequest<AdminUserPage>('/admin/users?page=0&size=50', {}, token),
-      apiRequest<{ inputTokens: number; outputTokens: number; requests: number }>('/admin/usage', {}, token),
+      apiRequest<AdminMetrics>('/admin/metrics', {}, token),
     ])
-      .then(([userPage, totals]) => {
+      .then(([userPage, summary]) => {
         if (!active) return
         setUsers(userPage.content)
-        setUsage(totals)
+        setMetrics(summary)
       })
       .catch((requestError: unknown) => {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar a área administrativa.')
@@ -1725,11 +1876,14 @@ function AdminPage({ aiConfigured }: { aiConfigured: boolean | null }) {
         <span className="notice-status">{aiConfigured ? 'CONECTADA' : 'EM CONFIGURAÇÃO'}</span>
       </section>
       {error && <p className="tasks-error" role="alert"><AlertCircle size={15} />{error}</p>}
-      {usage && (
+      {metrics && (
         <div className="admin-usage-card">
           <Database size={18} />
-          <span><strong>{usage.requests}</strong> solicitações registradas</span>
-          <span><strong>{usage.inputTokens + usage.outputTokens}</strong> tokens registrados</span>
+          <span><strong>{metrics.messages}</strong> mensagens nos últimos 30 dias</span>
+          <span><strong>{metrics.usage.inputTokens + metrics.usage.outputTokens}</strong> tokens no período</span>
+          {Object.entries(metrics.usersByPlan).map(([plan, count]) => (
+            <span key={plan}><strong>{count}</strong> usuários {plan}</span>
+          ))}
         </div>
       )}
       <div className="task-list-heading"><h2>Usuários</h2></div>

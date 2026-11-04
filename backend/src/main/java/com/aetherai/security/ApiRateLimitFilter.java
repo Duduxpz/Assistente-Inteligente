@@ -118,7 +118,8 @@ public class ApiRateLimitFilter extends OncePerRequestFilter {
 			case "/api/v1/auth/register" -> new EndpointLimit("register", registerLimit);
 			case "/api/v1/auth/password-reset/request",
 					"/api/v1/auth/password-reset/complete" -> new EndpointLimit("password-reset", passwordResetLimit);
-			default -> request.getRequestURI().matches("/api/v1/conversations/[^/]+/messages")
+			default -> request.getRequestURI()
+					.matches("/api/v1/conversations/[^/]+/messages(?:/stream|/[^/]+/regenerate/stream)?")
 					? new EndpointLimit("chat", chatLimit)
 					: null;
 		};

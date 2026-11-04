@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
@@ -8,6 +8,7 @@ import { AuthPage } from './auth/AuthPage'
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   apiRequest: vi.fn(),
+  streamChatMessage: vi.fn(),
   login: vi.fn(),
 }))
 
@@ -17,6 +18,7 @@ vi.mock('./lib/api', async (importOriginal) => {
   return {
     ...actual,
     apiRequest: mocks.apiRequest,
+    streamChatMessage: mocks.streamChatMessage,
     apiDownload: vi.fn(),
   }
 })
@@ -39,6 +41,12 @@ function renderApp(path: string) {
 describe('AETHER AI core flows', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    let conversationMessages: {
+      id: string
+      role: 'user' | 'assistant'
+      content: string
+      createdAt: string
+    }[] = []
     mocks.useAuth.mockReturnValue({
       token: 'test-token',
       user,
@@ -72,25 +80,7 @@ describe('AETHER AI core flows', () => {
           updatedAt: '2026-01-01T00:00:00Z',
         }
       }
-      if (path === '/conversations/conversation-1/messages' && options.method === 'POST') {
-        return {
-          messages: [
-            {
-              id: 'message-1',
-              role: 'user',
-              content: 'Olá, assistente',
-              createdAt: '2026-01-01T00:00:00Z',
-            },
-            {
-              id: 'message-2',
-              role: 'assistant',
-              content: 'Olá! Como posso ajudar?',
-              createdAt: '2026-01-01T00:00:01Z',
-            },
-          ],
-        }
-      }
-      if (path === '/conversations/conversation-1/messages') return []
+      if (path === '/conversations/conversation-1/messages') return conversationMessages
       if (path === '/tasks' && options.method === 'POST') {
         return {
           id: 'task-1',
@@ -104,6 +94,31 @@ describe('AETHER AI core flows', () => {
         }
       }
       return []
+    })
+    mocks.streamChatMessage.mockImplementation(async (
+      _path: string,
+      content: string,
+      _token: string,
+      _signal: AbortSignal,
+      onToken: (token: string) => void,
+    ) => {
+      conversationMessages = [
+        {
+          id: 'message-1',
+          role: 'user',
+          content,
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'message-2',
+          role: 'assistant',
+          content: 'Olá! Como posso ajudar?',
+          createdAt: '2026-01-01T00:00:01Z',
+        },
+      ]
+      onToken('Olá! ')
+      onToken('Como posso ajudar?')
+      return { messages: conversationMessages }
     })
   })
 
@@ -150,21 +165,36 @@ describe('AETHER AI core flows', () => {
   })
 
   it('creates a conversation and sends a message', async () => {
+    const testUser = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
     renderApp('/chat')
 
-    fireEvent.change(await screen.findByLabelText('Escreva sua mensagem'), {
-      target: { value: 'Olá, assistente' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensagem' }))
+    await testUser.type(await screen.findByLabelText('Escreva sua mensagem'), 'Olá, assistente')
+    await testUser.click(screen.getByRole('button', { name: 'Enviar mensagem' }))
 
-    expect(await screen.findByText('Olá! Como posso ajudar?')).toBeInTheDocument()
-    expect(mocks.apiRequest).toHaveBeenCalledWith(
-      '/conversations/conversation-1/messages',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ content: 'Olá, assistente' }),
-      }),
+    await waitFor(() => expect(mocks.streamChatMessage).toHaveBeenCalledWith(
+      '/conversations/conversation-1/messages/stream',
+      'Olá, assistente',
       'test-token',
-    )
-  })
+      expect.any(AbortSignal),
+      expect.any(Function),
+    ))
+    expect(await screen.findByText('Olá, assistente')).toBeInTheDocument()
+    expect(await screen.findByText(/Olá! Como posso ajudar/, {}, { timeout: 5000 })).toBeInTheDocument()
+    await testUser.click(screen.getByRole('button', { name: 'Copiar resposta' }))
+    expect(writeText).toHaveBeenCalledWith('Olá! Como posso ajudar?')
+
+    await testUser.click(screen.getByRole('button', { name: 'Regenerar resposta' }))
+    await waitFor(() => expect(mocks.streamChatMessage).toHaveBeenLastCalledWith(
+      '/conversations/conversation-1/messages/message-2/regenerate/stream',
+      '',
+      'test-token',
+      expect.any(AbortSignal),
+      expect.any(Function),
+    ))
+  }, 15000)
 })

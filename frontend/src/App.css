@@ -1627,6 +1627,7 @@
 
 .admin-usage-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 13px;
   padding: 13px;
@@ -3020,6 +3021,38 @@
   font-weight: 600;
 }
 
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.message-actions button,
+.code-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.message-actions button:hover:not(:disabled),
+.code-copy-button:hover {
+  border-color: rgba(168, 148, 255, 0.38);
+  color: #c8bbff;
+}
+
+.message-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .message-bubble > p,
 .markdown-content {
   margin: 5px 0 0;
@@ -3071,6 +3104,24 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   background: rgba(0, 0, 0, 0.2);
+}
+
+.code-block {
+  position: relative;
+}
+
+.code-copy-button {
+  position: absolute;
+  z-index: 1;
+  top: 5px;
+  right: 5px;
+  background: #161b22;
+  color: #c9d1d9;
+}
+
+.code-copy-error {
+  color: #e3a79e;
+  font-size: 8px;
 }
 
 .markdown-content pre code {

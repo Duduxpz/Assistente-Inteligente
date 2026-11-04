@@ -17,6 +17,8 @@ documentos, desenvolvido com Spring Boot e React.
 - Perfil, preferências e temas claro, escuro ou conforme o sistema.
 - Tarefas com prioridade, datas, edição e conclusão.
 - Conversas com histórico, renomeação e exclusão.
+- Respostas do chat em tempo real via SSE, com possibilidade de interromper a geração.
+- Renderização Markdown com destaque de sintaxe, cópia de respostas/código e regeneração da última resposta.
 - Upload, download e exclusão de documentos PDF, TXT e Markdown (até 10 MB).
 - Planos Free, Plus e Ultra com limites aplicados pela API.
 - Área administrativa protegida por função.
@@ -38,10 +40,11 @@ documentos, desenvolvido com Spring Boot e React.
 
 ```mermaid
 flowchart LR
-    Browser["Navegador<br/>React + TypeScript"] -->|"HTTPS / JSON / JWT"| API["API REST<br/>Spring Boot"]
-    API --> DB[("PostgreSQL<br/>produção")]
+    Browser["Navegador<br/>React + TypeScript"] -->|"HTTPS / JSON / SSE / JWT"| API["API REST<br/>Spring Boot"]
+    API --> DB[("PostgreSQL + pgvector<br/>produção")]
     API --> H2[("H2<br/>desenvolvimento")]
     API --> AI["OpenRouter<br/>(opcional)"]
+    API --> Embeddings["Provedor compatível com OpenAI<br/>embeddings (opcional)"]
     API --> Email["Resend<br/>(opcional)"]
     API --> Payments["Mercado Pago<br/>(opcional)"]
 ```
@@ -110,6 +113,8 @@ reais. As principais são:
 | `SERVER_PORT` | Porta HTTP do backend |
 | `VITE_API_BASE_URL` | URL base da API no frontend |
 | `AI_PROVIDER`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Provedor e modelo de IA |
+| `AI_MODEL_FREE`, `AI_MODEL_PLUS`, `AI_MODEL_ULTRA` | Modelos de chat por plano |
+| `RAG_ENABLED`, `RAG_EMBEDDING_BASE_URL`, `RAG_EMBEDDING_API_KEY`, `RAG_EMBEDDING_MODEL` | Indexação vetorial; dimensão configurada é 1536 |
 | `EMAIL_PROVIDER`, `RESEND_API_KEY`, `RESEND_FROM` | E-mail de recuperação |
 | `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET` | Checkout e webhook |
 | `FRONTEND_BASE_URL` | URL pública do frontend usada em links de e-mail/pagamento |
@@ -126,6 +131,7 @@ mvn -f backend\pom.xml test
 cd frontend
 npm ci
 npm run test:run
+npm run test:e2e
 npm run lint
 npm run build
 ```
@@ -136,9 +142,14 @@ npm run build
 - [x] Integrações opcionais de IA, recuperação de senha e cobrança recorrente.
 - [x] CI, testes automatizados do frontend e cobertura de segurança/limites.
 - [x] Docker Compose, perfil PostgreSQL de produção, Actuator e logs estruturados.
-- [ ] Rate limiting, refresh tokens e controles adicionais de segurança/LGPD.
-- [ ] Streaming de chat, UX aprimorada e RAG com documentos.
-- [ ] Modelos por plano, métricas administrativas, E2E e documentação de contribuição.
+- [x] Rate limiting, refresh tokens rotativos, validação de uploads, webhooks idempotentes e controles LGPD.
+- [x] Streaming de respostas do chat via SSE.
+- [x] UX aprimorada no chat: Markdown, código, cópia, regeneração e interrupção.
+- [x] RAG opcional com extração, chunks sobrepostos, embeddings e busca pgvector isolada por usuário.
+- [x] Modelos de chat configuráveis por plano.
+- [x] Métricas administrativas e E2E dos fluxos principais.
+- [x] Acessibilidade básica: formulários rotulados, navegação por teclado e foco visível.
+- [x] Guia de contribuição e decisões de arquitetura em `docs/adr/`.
 
 ## Licença
 

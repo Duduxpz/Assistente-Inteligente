@@ -72,6 +72,16 @@ public class MessageEntity {
 		return content;
 	}
 
+	public void replaceAssistantCompletion(String content, Long modelId, Integer inputTokens, Integer outputTokens) {
+		if (!"assistant".equals(role)) {
+			throw new IllegalStateException("Only assistant messages can be regenerated.");
+		}
+		this.content = content;
+		this.modelId = modelId;
+		this.inputTokens = inputTokens;
+		this.outputTokens = outputTokens;
+	}
+
 	public Instant getCreatedAt() {
 		return createdAt;
 	}

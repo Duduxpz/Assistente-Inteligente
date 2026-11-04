@@ -5,6 +5,8 @@ import com.aetherai.document.dto.DocumentResponse;
 import com.aetherai.document.entity.DocumentEntity;
 import com.aetherai.document.repository.DocumentRepository;
 import com.aetherai.plan.service.PlanLimitService;
+import com.aetherai.rag.DocumentIngestionService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,14 +40,17 @@ public class DocumentService {
 
 	private final DocumentRepository documentRepository;
 	private final PlanLimitService planLimitService;
+	private final ObjectProvider<DocumentIngestionService> ingestionService;
 	private final Path storageRoot;
 
 	public DocumentService(
 			DocumentRepository documentRepository,
 			PlanLimitService planLimitService,
+			ObjectProvider<DocumentIngestionService> ingestionService,
 			@Value("${app.documents.storage-path}") String storagePath) {
 		this.documentRepository = documentRepository;
 		this.planLimitService = planLimitService;
+		this.ingestionService = ingestionService;
 		this.storageRoot = Path.of(storagePath).toAbsolutePath().normalize();
 	}
 
@@ -76,8 +81,8 @@ public class DocumentService {
 		UUID documentId = UUID.randomUUID();
 		String storageKey = userId + "/" + documentId;
 		Path destination = resolveStorageKey(storageKey);
+		byte[] content;
 		try {
-			byte[] content;
 			try (var input = file.getInputStream()) {
 				content = input.readAllBytes();
 			}
@@ -96,7 +101,10 @@ public class DocumentService {
 				storageKey,
 				file.getSize());
 		try {
-			return DocumentResponse.from(documentRepository.save(document));
+			DocumentEntity saved = documentRepository.save(document);
+			DocumentIngestionService indexing = ingestionService.getIfAvailable();
+			if (indexing != null) indexing.index(saved, content);
+			return DocumentResponse.from(saved);
 		} catch (RuntimeException exception) {
 			try {
 				Files.deleteIfExists(destination);
@@ -125,6 +133,8 @@ public class DocumentService {
 	@Transactional
 	public void delete(UUID userId, UUID documentId) {
 		DocumentEntity document = getOwnedDocument(userId, documentId);
+		DocumentIngestionService indexing = ingestionService.getIfAvailable();
+		if (indexing != null) indexing.delete(documentId);
 		Path file = resolveStorageKey(document.getStorageKey());
 		try {
 			Files.deleteIfExists(file);
